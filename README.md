@@ -1,55 +1,52 @@
 # Codex Auto Resume
 
-在 Windows 上选一个本机 Codex 会话，为它安排一次性发送或持续续跑。到点后，Windows 任务计划程序启动 Codex App Server，在原会话发送消息。关闭窗口或锁屏后，计划仍能触发。保持 Windows 用户登录，并确保目标会话在发送时空闲。
+[English guide](docs/README.en.md) · [下载最新版本](https://github.com/PanGucheng/CodexAutoResume-GUI/releases/latest) · [贡献指南](CONTRIBUTING.md) · [MIT 许可](LICENSE)
 
-## 启动和使用
+在 Windows 版 Codex 的对话侧栏里，安排一条消息在额度恢复后发回原会话。工具读取 **5 小时和周额度**，可以选择 **恢复后 1 分钟**或指定时间。开启持续续跑后，只有 Codex 明确报告额度用尽，才会登记下一轮。每轮原样发送你填写的内容。
 
-需要 Windows 10/11、带 Tcl/Tk 的 Windows Python 3.10+ 和能运行 `codex app-server` 的 Codex CLI。本工具会自动查找 `codex.exe`，包括 Codex Desktop 安装的 CLI。如果自动查找失败，在窗口右上角的 **Codex 设置** 里手动选择。App Server 使用本机 Codex 的登录和配置。按需在终端运行 `codex login`。
+这是一个独立社区项目。计划由 Windows 任务计划程序运行，Codex 应用窗口关闭后也可触发。
 
-1. 双击 [Launch.cmd](Launch.cmd)。
-2. 选择近期会话，或粘贴会话 ID 或形如 `codex://threads/<ID>` 的会话链接。点击 **只读验证** 可以检查会话、工作目录和登录状态。
-3. 点击 **用额度恢复后 1 分钟** 填入时间，也可以直接输入 Windows 本地时间或使用时间快捷按钮。发送内容可编辑，默认为“继续完成之前的任务，不要停，直到当前计划完成。”
-4. 勾选 **持续续跑** 可在回合因 Codex 额度用尽而中断时安排后续轮次。点击创建按钮，核对会话、首次发送时间、续跑方式和消息并确认。若电脑可能进入睡眠，可勾选唤醒选项。唤醒取决于 Windows 电源设置和硬件。开机且已登录后，Windows 也可补跑错过的计划。
-5. 在 **任务记录** 查看执行详情，或取消尚在等待的任务。发送后可用 **打开 Codex 会话** 查看结果。如果 Desktop 已经打开目标会话但尚未显示新内容，切换会话后重新打开。
+## 安装原生面板
 
-## 额度时间与持续续跑
+1. 在 Windows 10/11 上安装并登录 Codex。确认 PowerShell 可以执行 `codex --version`、`py -3 --version` 和 `uv --version`。需要 Python 3.10 或更高版本。
+2. 在[最新发布](https://github.com/PanGucheng/CodexAutoResume-GUI/releases/latest)下载 **Source code (zip)**，完整解压到以后会保留的位置。发布包内有构建好的面板。解压目录也是本地插件市场的来源。
+3. 在解压后的项目根目录运行安装器。
 
-- 窗口打开时读取当前账号的普通 Codex 额度，显示 5 小时窗口和周窗口的使用率与恢复时间。可按 **刷新额度** 重新读取。各窗口均有余量时，快捷按钮使用 5 小时恢复时间。有窗口耗尽时，使用所有已耗尽窗口中最晚的恢复时间。发送时间在此基础上增加 1 分钟。
-- 每轮都原样发送所填写的消息。只有 Codex App Server 明确报告本轮额度用尽时，程序才会重新读取额度，在下次恢复后 1 分钟登记下一轮。回合正常结束时，续跑结束。
-- 有 Codex 会话目标时，发送前会检查目标状态。已完成、暂停或更换目标等情况会停止续跑。需要人工处理、出现其他错误，或额度恢复时间无法得知时，任务记录会说明原因。要手动停止，可以取消下一条等待中的计划，或在当前回合运行时选择 **停止后续续跑**。
+   ```powershell
+   powershell -NoProfile -ExecutionPolicy Bypass -File .\Install-Panel.ps1
+   ```
 
-[官方 App Server 额度与会话目标接口](https://learn.chatgpt.com/docs/app-server#6-rate-limits-chatgpt)
+4. 完全退出并重新打开 Codex。在一个已保存的本机会话里，点击右上角最右边的分栏图标，在右侧工作区点击 **新标签页 → 打开（Open）**，选择 **Codex Auto Resume**。如列表里没有它，展开 **Open** 右侧的 **···**。可以在这里固定面板入口。
 
-## Codex 原生对话面板
+## 创建与管理计划
 
-原生面板使用同一个本地任务库和 Windows 后台调度。从已有计划进入时，面板只显示绑定对话的记录。
+1. 核对面板顶部的会话标题。若需要手动绑定，粘贴 `codex://threads/<ID>` 后点击 **核对会话**。
+2. 选择 **额度恢复后 1 分钟**，或输入 Windows 本地时间。两项额度均耗尽时使用较晚的恢复时间。两项都有余量时，额度快捷选项使用 5 小时窗口的恢复时间。
+3. 填写发送内容，按需开启 **持续续跑**，核对会话、时间和内容后确认创建。
+4. 在 **任务记录** 查看发送结果、取消待执行计划，或停止后续续跑。回合正常结束时，持续续跑随之结束。
 
-1. 确认 `uv`、`py` 和 `codex` 可从 PowerShell 运行。在项目目录运行 `powershell -NoProfile -ExecutionPolicy Bypass -File .\Install-Panel.ps1`。安装脚本登记本地插件并配置后台运行环境。
-2. 完全退出并重新打开 Codex Desktop，进入一个已保存的本机对话。点击对话右上角最靠右的分栏图标（矩形内有一条竖线），展开右侧工作区。在工作区的**新标签页**里查找 **Codex Auto Resume**；如未列出，展开「打开」区域的更多工具选项。「来源 → ＋ → 使用插件」会在输入框插入蓝色的插件提及。
-3. 核对面板顶部的会话标题。如果宿主没有给出可验证的目标，请粘贴 `codex://threads/<ID>` 后点击 **核对会话**。
-4. 选择 **额度恢复后 1 分钟** 或手动时间，按需开启 **持续续跑**，点击 **核对并创建**。待执行计划可取消，正在执行的持续计划可停止后续轮次。详情在 **任务记录** 内展开。
+工具也提供独立的 Python/Tk 窗口。双击 [Launch.cmd](Launch.cmd)，可选择本机会话并使用同一个任务库。此入口需要 Python 带 Tcl/Tk。找不到 Codex CLI 时，可在窗口的 **Codex 设置**里选择 `codex.exe`。
 
-经常使用时，可在右侧面板点标签旁的 **＋**，打开 `Open` 行右边的 **···**，找到 **Codex Auto Resume** 并点击这一行的固定按钮。以后打开右侧工作区的新标签页，就能从 `Open` 区直接启动续跑面板。
+## 使用条件与排查
 
-执行器安装在 `%LOCALAPPDATA%\CodexAutoResumeGUI\panel-runtime`，带有版本目录。等待任务引用的旧目录需保留到对应任务结束。任务记录继续存放在已有的 `jobs.sqlite3`。
-
-开发时在 `panel` 目录运行 `npm ci`、`npm run typecheck` 和 `npm run build`。构建生成插件包内的 `panel.html`。`py -3 -m unittest discover -s tests` 运行回归测试，`py -3 -X utf8 tests/check_native_host.py` 在隔离配置验证本机 App Server 的注册、资源和工具链路。[OpenAI 本地插件安装说明](https://developers.openai.com/plugins/build/plugins#install-a-local-plugin-manually)
-
-## 状态与排查
-
-| 窗口状态 | 含义 |
+| 情况 | 处理方式 |
 | --- | --- |
-| 等待触发 | Windows 已登记计划；只有这时可以取消。 |
-| 已接收 · 执行中 | Codex 已返回 turn ID，后台在等回合完成。 |
-| 已完成 | 回合正常结束，或 Codex 会话目标已完成。 |
-| 已安排下一轮 | 后续续跑计划已登记，详情显示下次发送时间。 |
-| 已停止续跑 | 用户停止了后续续跑，或原会话目标已更换或清除。 |
-| 需查看日志 | 有人工交互、任务状态无法确认，或后续轮次创建失败。 |
-| 失败 | 检查、恢复或回合执行失败。日志内包含原因；已有 turn ID 时可先去原会话查看。 |
-| 结果待核对 | 发送或执行期间超时、断连或后台进程结束。请在原会话核对结果后再决定是否手动创建新计划。 |
+| 看不到原生面板 | 确认在已保存的本机会话右侧工作区。摘要里的「来源 → 使用插件」会把插件提及放入输入框。 |
+| 到点没有发送 | 检查 Windows 用户是否仍登录，以及目标会话是否空闲。锁屏可以触发。睡眠唤醒取决于硬件和电源设置，登录后可补跑错过的计划。 |
+| 额度恢复时间不可用 | 刷新额度或手动选择首次发送时间。如果额度中断后缺少所需的恢复时间，任务记录会说明原因。 |
+| 需查看日志 | 查看是否有人工交互、目标变化或登记失败。运行中的 Codex 需要批准或输入时，后台会记录该请求。 |
+| 结果待核对 | 先查看原会话是否已收到消息，再决定是否新建计划。发送后断连不会自动重试。 |
 
-目标会话需要已经保存到本机，并且允许用户直接输入。程序调用独立的 App Server 进程，既有 Codex 使用权限仍适用。如果 Desktop 正在处理目标会话，后台会尝试从已存记录识别并跳过发送。调度器无法完全同步独立客户端的实时状态，因此请在预定时刻让目标会话保持空闲。单个回合最多等待 12 小时。
+后台使用当前 Windows 用户的 Codex 登录与配置。提示词和执行记录保存在 `%LOCALAPPDATA%\CodexAutoResumeGUI\jobs.sqlite3`，本机计划任务名称以 `CodexAutoResumeGUI_` 开头。后台执行器位于同一数据目录下的 `panel-runtime`。升级或移动文件夹时，保留待执行计划仍引用的运行目录。
 
-`CodexAutoResumeGUI_…` 是本程序创建的 Windows 任务名。提示词和执行记录保存在 `%LOCALAPPDATA%\CodexAutoResumeGUI\jobs.sqlite3`，启动异常写入同目录 `errors.log`。挂起的计划引用当前程序所在路径，移动文件夹或卸载 Python 前，请先取消并重新创建待发送计划。旧版 `CodexAutoResume_…` 任务继续由 Windows 任务计划程序管理。如有旧版待发送任务，可在那里确认并取消。
+## 源码与复用
 
-接口选择、数据流和验收标准见 [DESIGN.md](DESIGN.md)。
+| 入口 | 用途 |
+| --- | --- |
+| [`codex_client.py`](codex_client.py) | App Server 的 stdio 客户端、额度读取和恢复时间计算 |
+| [`jobs.py`](jobs.py)、[`task-scheduler.ps1`](task-scheduler.ps1) | SQLite 任务库、Windows 调度和续跑执行器 |
+| [`panel/`](panel/) | MCP 服务、会话绑定与 TypeScript 原生面板 |
+| [`plugins/codex-auto-resume/`](plugins/codex-auto-resume/) | 可安装的插件和生成的单文件面板 |
+| [`tests/`](tests/) | 回归测试与可选的本机 App Server 验证 |
+
+接口与数据流见[设计说明](DESIGN.md)，构建和测试见[贡献指南](CONTRIBUTING.md)。项目代码使用 [MIT](LICENSE)，面板内的第三方代码保留[原许可声明](THIRD_PARTY_NOTICES.txt)。

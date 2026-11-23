@@ -1,0 +1,29 @@
+name: Bug report · 问题报告
+description: Report an installation, panel, quota, or scheduling problem.
+body:
+  - type: input
+    id: versions
+    attributes:
+      label: Versions · 版本
+      description: Include Windows, Codex Desktop, Codex CLI, and plugin versions.
+    validations:
+      required: true
+  - type: textarea
+    id: behavior
+    attributes:
+      label: What happened? · 实际表现
+      description: Describe what happened and what you expected to happen.
+    validations:
+      required: true
+  - type: textarea
+    id: steps
+    attributes:
+      label: Steps to reproduce · 复现步骤
+      description: Include the operation and any settings needed to reproduce it.
+    validations:
+      required: true
+  - type: textarea
+    id: logs
+    attributes:
+      label: Logs or screenshots · 日志或截图
+      description: Share relevant excerpts. Remove credentials, conversation contents or IDs, and private paths.
