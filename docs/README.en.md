@@ -14,22 +14,22 @@ Start Codex as usual and leave the target chat loaded for automatic dispatch. Ke
 
 ## Install the native panel
 
-1. Sign in to Codex on Windows 10 or 11. In PowerShell, check `py -3 --version` and `uv --version`. Python 3.10 or later is required. The installer prefers the Codex binary bundled with the Microsoft Store desktop app and can use a CLI on `PATH` for other installations.
-2. Download **Source code (zip)** from the [latest release](https://github.com/PanGucheng/Codex-Auto-Resume/releases/latest) and extract the entire archive into a permanent folder. It includes the built panel. Codex registers this folder as the source for the local plugin marketplace.
-3. Run the installer from the extracted project root.
-
-   ```powershell
-   powershell -NoProfile -ExecutionPolicy Bypass -File .\Install-Panel.ps1
-   ```
-
-4. Quit and reopen Codex. Open a saved local conversation and click **Show tabs** (**显示标签页**) at the far right of the header, or press `Ctrl+Shift+B`.
+1. Install and sign in to Codex Desktop on Windows 10 or 11 x64. Setup prefers the Codex binary bundled with the Microsoft Store desktop app and can use a CLI on `PATH` for other installations.
+2. Download **Setup-x64.exe** from the [latest release](https://github.com/PanGucheng/Codex-Auto-Resume/releases/latest) and double-click it. Setup includes Python and dependencies and installs for your Windows user. An SHA-256 checksum is available on the release page.
+3. Quit and reopen Codex. Open a saved local conversation and click **Show tabs** (**显示标签页**) at the far right of the header, or press `Ctrl+Shift+B`.
 
    ![The Show tabs button at the far right of the Codex conversation header](images/codex-show-tabs-button.png)
    ![The Chinese Show tabs tooltip and Ctrl+Shift+B keyboard shortcut](images/codex-show-tabs-tooltip.png)
 
-5. Open a **New tab** in the right pane. Select the **Codex Auto Resume** tile under **Open**, or use the **···** menu beside **Open** to open and pin it. The panel currently uses Chinese labels.
+4. Open a **New tab** in the right pane. Select the **Codex Auto Resume** tile under **Open**, or use the **···** menu beside **Open** to open and pin it. The panel currently uses Chinese labels.
 
    <img src="images/codex-auto-resume-open-menu.png" alt="The Open menu on the new tab page with Codex Auto Resume and its pin button" width="470">
+
+Run a newer installer to upgrade. Existing plans and history are preserved. Uninstalling from Windows **Installed apps** cancels future scheduled sends and stops further rounds. Codex handles any message it already queued or started.
+
+### Install from source
+
+For **Source code (zip)**, install Windows Python 3.10 or later and `uv`. Extract the entire archive into a permanent folder and run `powershell -NoProfile -ExecutionPolicy Bypass -File .\Install-Panel.ps1` from that folder.
 
 ## Resume the current conversation
 
@@ -37,7 +37,7 @@ The default path uses the same queue as the documented [`codex queue`](https://l
 
 ### Scheduled new chats and advanced mode
 
-Scheduled new chats work with the normal desktop launch. New chats and explicit model or reasoning overrides use App Server. To override settings for a conversation the running desktop already owns, you can use the experimental shared App Server mode with the Microsoft Store desktop package. Quit the regular desktop instance and use this launcher to open it in shared mode.
+Scheduled new chats work with the normal desktop launch. New chats and explicit model or reasoning overrides use App Server. The experimental shared App Server can override settings for a conversation the Microsoft Store desktop app already owns. Quit the regular desktop instance and run the launcher from `%LOCALAPPDATA%\CodexAutoResumeGUI\setup` or the source directory.
 
 ```powershell
 powershell -NoProfile -ExecutionPolicy Bypass -File .\Start-SharedCodex.ps1

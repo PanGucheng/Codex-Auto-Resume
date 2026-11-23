@@ -13,7 +13,7 @@ import time
 from dataclasses import dataclass
 
 
-VERSION = "1.4.1"
+VERSION = "1.4.2"
 NO_WINDOW = getattr(subprocess, "CREATE_NO_WINDOW", 0)
 FIVE_HOUR_WINDOW = 300
 WEEKLY_WINDOW = 10080

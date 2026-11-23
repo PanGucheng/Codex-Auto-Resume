@@ -32,6 +32,18 @@ uv sync --project panel --locked
 .\panel\.venv\Scripts\python.exe -X utf8 tests/check_shared_host.py
 ```
 
+## Build the Windows installer
+
+Build the panel first with `npm run build` from `panel/`. With `uv` and the Inno Setup 6 compiler installed, run from the repository root.
+
+```powershell
+.\installer\Build.ps1 -InnoCompiler 'C:\Program Files (x86)\Inno Setup 6\ISCC.exe'
+```
+
+The build checks the embedded interpreter's SHA-256, installs Windows wheels from the committed lockfile, and starts the MCP server from a clean installation with system Python and uv removed from `PATH`. The installer and checksum are written to `dist/windows/`.
+
+Push to `main` to build the `windows-x64-installer` artifact in GitHub Actions. Push `vX.Y.Z` to publish it to GitHub Releases. Use the same version in the plugin manifest, panel and Python metadata, and generated HTML before pushing a release tag.
+
 ## Submit a change
 
 Describe the user-visible change, the tests you ran, and any Windows or Codex versions needed to reproduce it. Include a screenshot with synthetic data for UI changes when it helps explain them. Keep credentials, conversation IDs and content, private paths, and local databases out of public reports.

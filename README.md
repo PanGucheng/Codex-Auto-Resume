@@ -14,22 +14,22 @@
 
 ## 安装原生面板
 
-1. 在 Windows 10/11 上安装并登录 Codex。确认 PowerShell 可以执行 `py -3 --version` 和 `uv --version`。需要 Python 3.10 或更高版本。安装器优先使用 Microsoft Store 版桌面自带的 `codex.exe`，其他版本需要在 `PATH` 上提供 Codex CLI。
-2. 在[最新发布](https://github.com/PanGucheng/Codex-Auto-Resume/releases/latest)下载 **Source code (zip)**，完整解压到以后会保留的位置。发布包内有构建好的面板。解压目录也是本地插件市场的来源。
-3. 在解压后的项目根目录运行安装器。
-
-   ```powershell
-   powershell -NoProfile -ExecutionPolicy Bypass -File .\Install-Panel.ps1
-   ```
-
-4. 完全退出并重新打开 Codex。进入一个已保存的本机会话，点击右上角最右边的 **显示标签页**，或按 `Ctrl+Shift+B`。
+1. 在 Windows 10/11 x64 上安装并登录 Codex Desktop。安装包会优先使用 Microsoft Store 版桌面自带的 `codex.exe`，其他版本可以通过 `PATH` 提供 Codex CLI。
+2. 从[最新发布](https://github.com/PanGucheng/Codex-Auto-Resume/releases/latest)下载 **Setup-x64.exe**，双击安装。安装包内置 Python 和依赖，按当前 Windows 用户安装。发布页同时提供 SHA-256 校验文件。
+3. 完全退出并重新打开 Codex。进入一个已保存的本机会话，点击右上角最右边的 **显示标签页**，或按 `Ctrl+Shift+B`。
 
    ![对话标题栏右上角，最右边是显示标签页按钮](docs/images/codex-show-tabs-button.png)
    ![显示标签页按钮的提示和 Ctrl+Shift+B 快捷键](docs/images/codex-show-tabs-tooltip.png)
 
-5. 在右侧打开 **新标签页**。如果 **Open** 下已经有 **Codex Auto Resume** 卡片，直接点击。也可以在 **Open** 右侧点 **···**，选择 **Codex Auto Resume**，再用图钉固定入口。
+4. 在右侧打开 **新标签页**。如果 **Open** 下已经有 **Codex Auto Resume** 卡片，直接点击。也可以在 **Open** 右侧点 **···**，选择 **Codex Auto Resume**，再用图钉固定入口。
 
    <img src="docs/images/codex-auto-resume-open-menu.png" alt="新标签页的 Open 菜单，显示 Codex Auto Resume 和固定入口的图钉" width="470">
+
+升级时直接运行新版安装包，现有计划和历史会保留。从 Windows 的 **已安装的应用** 卸载时，会取消待触发计划并停止安排后续轮次，已入队消息和已启动回合交给 Codex 处理。
+
+### 从源码安装
+
+如果使用 **Source code (zip)**，先安装 Windows Python 3.10 或更高版本和 `uv`，把源码完整解压到长期保留的目录，再运行 `powershell -NoProfile -ExecutionPolicy Bypass -File .\Install-Panel.ps1`。
 
 ## 当前对话续跑
 
@@ -37,7 +37,7 @@
 
 ### 定时新建对话与高级模式
 
-**到点新建对话**支持普通启动。新建对话或显式选择模型和思考强度时使用 App Server。如果需要在桌面仍占用原对话的情况下覆盖设置，Microsoft Store 版可用实验性的共享 App Server。从托盘退出桌面后，使用以下命令启动共享模式。
+**到点新建对话**支持普通启动。新建对话或显式选择模型和思考强度时使用 App Server。如果需要在桌面仍占用原对话的情况下覆盖设置，Microsoft Store 版可用实验性的共享 App Server。从托盘退出桌面后，在 `%LOCALAPPDATA%\CodexAutoResumeGUI\setup` 或源码目录中运行以下命令。
 
 ```powershell
 powershell -NoProfile -ExecutionPolicy Bypass -File .\Start-SharedCodex.ps1

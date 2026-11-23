@@ -1,7 +1,7 @@
 {
   "$schema": "https://agent-plugins.org/schemas/1.0.0/plugin.schema.json",
   "name": "codex-auto-resume",
-  "version": "1.4.1",
+  "version": "1.4.2",
   "description": "Schedule and manage follow-ups from a native conversation panel in Codex for Windows.",
   "extensions": {
     "com.openai": {

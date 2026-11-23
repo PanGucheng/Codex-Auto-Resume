@@ -22,7 +22,7 @@ const input = (id: string) => el<HTMLInputElement>(id);
 const select = (id: string) => el<HTMLSelectElement>(id);
 const button = (id: string) => el<HTMLButtonElement>(id);
 const dialog = el<HTMLDialogElement>("confirmation");
-const app = new App({ name: "Codex Auto Resume", version: "1.4.1" });
+const app = new App({ name: "Codex Auto Resume", version: "1.4.2" });
 let key = "";
 let bindingRevision = 0;
 let jobsRevision = 0;
