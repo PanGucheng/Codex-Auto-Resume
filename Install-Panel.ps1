@@ -34,10 +34,15 @@ function Get-RegisteredMarketplace([string]$Codex) {
     ($json | ConvertFrom-Json).marketplaces | Where-Object { $_.name -eq $marketplaceName } | Select-Object -First 1
 }
 
-function Install-Plugin([string]$Codex, [string]$Marketplace) {
+function Test-SameDirectory([string]$Python, [string]$First, [string]$Second) {
+    & $Python -B -c 'from pathlib import Path; import sys; sys.exit(Path(sys.argv[1]).resolve() != Path(sys.argv[2]).resolve())' $First $Second
+    return ($LASTEXITCODE -eq 0)
+}
+
+function Install-Plugin([string]$Codex, [string]$Marketplace, [string]$Python) {
     $previous = Get-RegisteredMarketplace $Codex
     $previousRoot = if ($previous) { $previous.root -replace '^\\\\\?\\', '' }
-    $changingSource = $previousRoot -and ([IO.Path]::GetFullPath($previousRoot) -ne [IO.Path]::GetFullPath($Marketplace))
+    $changingSource = $previousRoot -and -not (Test-SameDirectory $Python $previousRoot $Marketplace)
     if ($changingSource) {
         & $Codex plugin marketplace remove $marketplaceName
         if ($LASTEXITCODE -ne 0) { throw 'Could not switch the Codex Auto Resume marketplace.' }
@@ -69,12 +74,13 @@ if ($UninstallBundle) {
     $runtime = Join-Path $root $current
     $stopPlans = Join-Path $runtime 'stop-installed-plans.py'
     if (-not (Test-Path -LiteralPath $stopPlans -PathType Leaf)) { return }
+    $python = Join-Path $runtime '.venv/Scripts/python.exe'
     $codex = Find-Codex
     if ($codex) {
         $existing = Get-RegisteredMarketplace $codex
-        if ($existing -and (($existing.root -replace '^\\\\\?\\', '') -ne (Join-Path $runtime 'marketplace'))) { return }
+        if ($existing -and -not (Test-SameDirectory $python $existing.root (Join-Path $runtime 'marketplace'))) { return }
     }
-    & (Join-Path $runtime '.venv/Scripts/python.exe') -B $stopPlans
+    & $python -B $stopPlans
     if ($LASTEXITCODE -ne 0) { throw 'Could not stop all pending plans. Check the job history before uninstalling.' }
     if ($codex -and $existing) {
         & $codex plugin remove $pluginId
@@ -135,7 +141,7 @@ if ($BundledPayload) {
     }
 }
 
-if (-not $RuntimeOnly) { Install-Plugin $codex $marketplace }
+if (-not $RuntimeOnly) { Install-Plugin $codex $marketplace $basePython }
 $temp = Join-Path $root ([guid]::NewGuid().ToString('N') + '.json')
 [IO.File]::WriteAllText($temp, ((@{ version = $version } | ConvertTo-Json -Compress)), [Text.UTF8Encoding]::new($false))
 & $basePython -B -c 'import os,sys; os.replace(sys.argv[1], sys.argv[2])' $temp $pointer
