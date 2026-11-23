@@ -1,6 +1,6 @@
 # Codex Auto Resume
 
-[English guide](docs/README.en.md) · [下载最新版本](https://github.com/PanGucheng/CodexAutoResume-GUI/releases/latest) · [贡献指南](CONTRIBUTING.md) · [MIT 许可](LICENSE)
+[English guide](docs/README.en.md) · [下载最新版本](https://github.com/PanGucheng/Codex-Auto-Resume/releases/latest) · [贡献指南](CONTRIBUTING.md) · [MIT 许可](LICENSE)
 
 **在 Windows 上，等 Codex 额度恢复后自动接着跑。**
 
@@ -15,7 +15,7 @@
 ## 安装原生面板
 
 1. 在 Windows 10/11 上安装并登录 Codex。确认 PowerShell 可以执行 `py -3 --version` 和 `uv --version`。需要 Python 3.10 或更高版本。安装器优先使用 Microsoft Store 版桌面自带的 `codex.exe`，其他版本需要在 `PATH` 上提供 Codex CLI。
-2. 在[最新发布](https://github.com/PanGucheng/CodexAutoResume-GUI/releases/latest)下载 **Source code (zip)**，完整解压到以后会保留的位置。发布包内有构建好的面板。解压目录也是本地插件市场的来源。
+2. 在[最新发布](https://github.com/PanGucheng/Codex-Auto-Resume/releases/latest)下载 **Source code (zip)**，完整解压到以后会保留的位置。发布包内有构建好的面板。解压目录也是本地插件市场的来源。
 3. 在解压后的项目根目录运行安装器。
 
    ```powershell

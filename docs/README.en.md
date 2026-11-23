@@ -1,6 +1,6 @@
 # Codex Auto Resume
 
-[中文](../README.md) · [Latest release](https://github.com/PanGucheng/CodexAutoResume-GUI/releases/latest) · [Contributing](../CONTRIBUTING.md) · [MIT license](../LICENSE)
+[中文](../README.md) · [Latest release](https://github.com/PanGucheng/Codex-Auto-Resume/releases/latest) · [Contributing](../CONTRIBUTING.md) · [MIT license](../LICENSE)
 
 **Resume Codex work on Windows after your usage limit resets.**
 
@@ -15,7 +15,7 @@ Start Codex as usual and leave the target chat loaded for automatic dispatch. Ke
 ## Install the native panel
 
 1. Sign in to Codex on Windows 10 or 11. In PowerShell, check `py -3 --version` and `uv --version`. Python 3.10 or later is required. The installer prefers the Codex binary bundled with the Microsoft Store desktop app and can use a CLI on `PATH` for other installations.
-2. Download **Source code (zip)** from the [latest release](https://github.com/PanGucheng/CodexAutoResume-GUI/releases/latest) and extract the entire archive into a permanent folder. It includes the built panel. Codex registers this folder as the source for the local plugin marketplace.
+2. Download **Source code (zip)** from the [latest release](https://github.com/PanGucheng/Codex-Auto-Resume/releases/latest) and extract the entire archive into a permanent folder. It includes the built panel. Codex registers this folder as the source for the local plugin marketplace.
 3. Run the installer from the extracted project root.
 
    ```powershell
