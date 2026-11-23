@@ -1,0 +1,69 @@
+<!doctype html>
+<html lang="zh-CN">
+<head>
+  <meta charset="utf-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1">
+  <title>Codex Auto Resume</title>
+  <!-- PANEL_STYLE -->
+</head>
+<body>
+  <svg class="symbols" xmlns="http://www.w3.org/2000/svg" aria-hidden="true">
+    <symbol id="i-chat" viewBox="0 0 24 24"><path d="M20 13a4 4 0 0 1-4 4H9l-5 4v-5a4 4 0 0 1-1-3V8a4 4 0 0 1 4-4h9a4 4 0 0 1 4 4z"/><path d="M7 9h9M7 12h6"/></symbol>
+    <symbol id="i-clock" viewBox="0 0 24 24"><circle cx="12" cy="12" r="8.5"/><path d="M12 7v5l3.5 2"/></symbol>
+    <symbol id="i-refresh" viewBox="0 0 24 24"><path d="M20 5v5h-5M4 19v-5h5"/><path d="M4.7 9a8 8 0 0 1 13.6-3L20 9M4 15l1.7 3A8 8 0 0 0 19.3 15"/></symbol>
+    <symbol id="i-calendar" viewBox="0 0 24 24"><rect x="4" y="6" width="16" height="15" rx="3"/><path d="M8 3v6m8-6v6M4 11h16"/></symbol>
+    <symbol id="i-sliders" viewBox="0 0 24 24"><path d="M3 7h4m5 0h9M3 17h10m5 0h3"/><circle cx="9.5" cy="7" r="2.5"/><circle cx="15.5" cy="17" r="2.5"/></symbol>
+    <symbol id="i-history" viewBox="0 0 24 24"><path d="M3.5 5v5h5M4 9a8.5 8.5 0 1 1-.1 6M12 7.5V12l3 2"/></symbol>
+  </svg>
+  <main>
+    <header class="heading">
+      <span class="thread-icon"><svg class="icon" aria-hidden="true"><use href="#i-chat"/></svg></span>
+      <div class="identity"><p class="caption">当前对话</p><h1 id="title">Codex Auto Resume</h1></div>
+    </header>
+    <p id="notice" class="notice" role="status">正在连接 Codex…</p>
+    <form id="binding" hidden>
+      <label for="link">本机会话链接</label>
+      <div class="row"><input id="link" placeholder="codex://threads/…" autocomplete="off" required><button type="submit">核对会话</button></div>
+    </form>
+    <div id="workspace" hidden>
+      <section class="next" aria-labelledby="next-label">
+        <svg class="icon" aria-hidden="true"><use href="#i-clock"/></svg><h2 id="next-label">下次发送</h2>
+        <p id="next-time">暂无计划</p><button id="next-action" type="button" hidden>停止续跑</button>
+      </section>
+      <section class="section quota" aria-labelledby="quota-label">
+        <header class="row split"><h2 id="quota-label">Codex 额度</h2><button id="refresh" type="button" class="quiet"><svg class="icon" aria-hidden="true"><use href="#i-refresh"/></svg>刷新</button></header>
+        <div class="quota-grid">
+          <div class="quota-tile"><div class="row split"><strong>5 小时</strong><span id="short-text">读取中</span></div><progress id="short-bar" max="100" value="0" aria-label="5 小时额度使用率"></progress><small id="short-reset"></small></div>
+          <div class="quota-tile"><div class="row split"><strong>每周</strong><span id="week-text">读取中</span></div><progress id="week-bar" max="100" value="0" aria-label="周额度使用率"></progress><small id="week-reset"></small></div>
+        </div>
+        <p id="quota-reason" class="hint" hidden></p>
+      </section>
+      <form id="create" class="section settings">
+        <h2>安排续跑</h2>
+        <fieldset><legend>发送时间 <small>Windows 本地时间</small></legend>
+          <div class="modes">
+            <label><input type="radio" name="mode" value="quota" id="auto" checked disabled><span>额度恢复后 1 分钟</span></label>
+            <label><input type="radio" name="mode" value="manual" id="manual"><span>手动指定时间</span></label>
+          </div>
+          <div id="suggested-time"><svg class="icon" aria-hidden="true"><use href="#i-calendar"/></svg><span id="suggestion">读取中…</span></div>
+          <input id="when" type="datetime-local" step="1" aria-label="Windows 本地发送时间" hidden>
+        </fieldset>
+        <label class="continuous"><span>持续续跑<small>任务未完成时，在下次额度恢复后继续</small></span><input type="checkbox" role="switch" id="continuous"></label>
+        <details class="options">
+          <summary><svg class="icon" aria-hidden="true"><use href="#i-sliders"/></svg>发送内容与唤醒设置</summary>
+          <div class="extras"><label for="message">发送内容</label><textarea id="message" rows="3" maxlength="16000"></textarea>
+            <label class="wake"><input type="checkbox" id="wake">允许 Windows 尝试从睡眠唤醒</label></div>
+        </details>
+        <button class="primary" id="review" type="submit" disabled>核对并创建</button>
+      </form>
+      <details id="history" class="history"><summary><svg class="icon" aria-hidden="true"><use href="#i-history"/></svg>任务记录</summary><ul id="jobs"></ul></details>
+    </div>
+  </main>
+  <dialog id="confirmation" aria-labelledby="confirm-title">
+    <h2 id="confirm-title">确认续跑计划</h2><p id="confirm-detail"></p>
+    <p id="confirm-error" class="notice error" role="status" hidden></p>
+    <div class="row"><button id="dismiss" type="button">返回</button><button id="confirm" type="button" class="primary">确认创建</button></div>
+  </dialog>
+  <!-- PANEL_SCRIPT -->
+</body>
+</html>
