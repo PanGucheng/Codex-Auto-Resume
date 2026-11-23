@@ -22,7 +22,14 @@
    powershell -NoProfile -ExecutionPolicy Bypass -File .\Install-Panel.ps1
    ```
 
-4. 完全退出并重新打开 Codex。在一个已保存的本机会话里，点击右上角最右边的分栏图标，在右侧工作区点击 **新标签页 → 打开（Open）**，选择 **Codex Auto Resume**。如列表里没有它，展开 **Open** 右侧的 **···**。可以在这里固定面板入口。
+4. 完全退出并重新打开 Codex。进入一个已保存的本机会话，点击右上角最右边的 **显示标签页**，或按 `Ctrl+Shift+B`。
+
+   ![对话标题栏右上角，最右边是显示标签页按钮](docs/images/codex-show-tabs-button.png)
+   ![显示标签页按钮的提示和 Ctrl+Shift+B 快捷键](docs/images/codex-show-tabs-tooltip.png)
+
+5. 在右侧打开 **新标签页**。如果 **Open** 下已经有 **Codex Auto Resume** 卡片，直接点击。也可以在 **Open** 右侧点 **···**，选择 **Codex Auto Resume**，再用图钉固定入口。
+
+   <img src="docs/images/codex-auto-resume-open-menu.png" alt="新标签页的 Open 菜单，显示 Codex Auto Resume 和固定入口的图钉" width="470">
 
 ## 当前对话续跑
 
@@ -46,6 +53,8 @@ powershell -NoProfile -ExecutionPolicy Bypass -File .\Start-SharedCodex.ps1
 4. 填写发送内容，按需开启 **持续续跑**，核对会话、时间和内容后确认创建。
 5. 在 **任务记录** 查看发送结果、取消待执行计划，或停止后续续跑。正常结束时持续续跑随之结束。队列任务最多监控 12 小时，监控中断或到期时请先在原对话核对结果。
 
+<img src="docs/images/codex-auto-resume-panel.png" alt="Codex Auto Resume 对话面板，显示 5 小时和周额度、额度恢复后 1 分钟选项及持续续跑开关" width="470">
+
 可以在多个对话中分别打开面板并创建计划。不同对话可以在同一时间执行，各自显示任务记录。同一对话最多有一条启用的持续续跑计划。同一账号下的会话共用额度。
 
 工具也提供独立的 Python/Tk 窗口。双击 [Launch.cmd](Launch.cmd)，可选择本机会话并使用同一个任务库。此入口需要 Python 带 Tcl/Tk。找不到 Codex CLI 时，可在窗口的 **Codex 设置**里选择 `codex.exe`。
@@ -54,7 +63,7 @@ powershell -NoProfile -ExecutionPolicy Bypass -File .\Start-SharedCodex.ps1
 
 | 情况 | 处理方式 |
 | --- | --- |
-| 看不到原生面板 | 确认在已保存的本机会话右侧工作区。摘要里的「来源 → 使用插件」会把插件提及放入输入框。 |
+| 看不到原生面板 | 在已保存的本机会话里点击右上角的 **显示标签页**，再从新标签页的 **Open** 菜单查找。 |
 | 到点没有发送 | 检查 Windows 用户是否仍登录，以及目标会话是否已加载。锁屏可以触发。睡眠唤醒取决于硬件和电源设置，登录后可补跑错过的计划。 |
 | `already has an active writer` | 显式覆盖设置或旧计划走直连 App Server 时，另一个 Codex 进程可能仍持有会话写入锁。沿用原设置可新建队列计划。需要覆盖设置时，可用共享启动入口。 |
 | 额度恢复时间不可用 | 刷新额度或手动选择首次发送时间。如果额度中断后缺少所需的恢复时间，任务记录会说明原因。 |

@@ -22,7 +22,14 @@ Start Codex as usual and leave the target chat loaded for automatic dispatch. Ke
    powershell -NoProfile -ExecutionPolicy Bypass -File .\Install-Panel.ps1
    ```
 
-4. Quit and reopen Codex. Open a saved local conversation, click the rightmost split-pane button in its header, and open a new tab in the right workspace. Choose **Codex Auto Resume** under **Open** or use the **···** menu beside **Open** to find and pin it. The enclosed panel currently uses Chinese labels.
+4. Quit and reopen Codex. Open a saved local conversation and click **Show tabs** (**显示标签页**) at the far right of the header, or press `Ctrl+Shift+B`.
+
+   ![The Show tabs button at the far right of the Codex conversation header](images/codex-show-tabs-button.png)
+   ![The Chinese Show tabs tooltip and Ctrl+Shift+B keyboard shortcut](images/codex-show-tabs-tooltip.png)
+
+5. Open a **New tab** in the right pane. Select the **Codex Auto Resume** tile under **Open**, or use the **···** menu beside **Open** to open and pin it. The panel currently uses Chinese labels.
+
+   <img src="images/codex-auto-resume-open-menu.png" alt="The Open menu on the new tab page with Codex Auto Resume and its pin button" width="470">
 
 ## Resume the current conversation
 
@@ -45,6 +52,8 @@ Keep the local service running for shared jobs. To return to the default desktop
 3. Choose the current chat or a new chat in the same working directory. Open **消息、模型与唤醒** to pick a model and a supported reasoning effort. An explicit override updates the settings for subsequent turns in the target chat.
 4. Enter your message, choose whether to enable **持续续跑** (Continuous resume), and confirm the target, time and message. Check **任务记录** (Job history) to cancel a pending send or stop future rounds.
 
+<img src="images/codex-auto-resume-panel.png" alt="Codex Auto Resume panel showing the five-hour and weekly quota windows, the one-minute-after-reset option, and the continuous resume switch" width="470">
+
 A normally finished round ends continuous resume. When Codex reports a usage limit, the worker reads the reset times again before scheduling the next one-time job. A saved conversation goal can stop a scheduled send if it is already complete, paused, or replaced.
 
 Different conversations can have their own panels and schedules, and can run at the same time. Each conversation can have one enabled continuous-resume plan. Conversations under the same account share its quota.
@@ -53,7 +62,7 @@ For the standalone window, run [Launch.cmd](../Launch.cmd) with a Windows Python
 
 ## Troubleshooting
 
-- If the panel is missing, check the right workspace of a saved local conversation. The **Sources** menu inserts a plugin mention into the composer.
+- If the panel is missing, use **Show tabs** in a saved local conversation and check the **Open** menu on its new tab page.
 - While Windows is locked, scheduled sends can run with your user signed in. Wake from sleep depends on the PC and its power settings.
 - If an older job or a settings override reports `already has an active writer`, the desktop may still own the thread. Create a queue job to inherit the thread's settings, or use shared mode for an override.
 - The worker monitors queue jobs for up to 12 hours. If monitoring ends before the turn is confirmed, inspect the original conversation for the outcome.
