@@ -25,6 +25,13 @@ py -3 -X utf8 tests/check_native_host.py
 
 It installs into temporary directories, opens two ephemeral App Server conversations and checks panel discovery, scoped bindings, and the HTML resource. The check starts zero model turns.
 
+To validate the protected shared WebSocket transport on Windows, install the locked Python dependencies and run the isolated shared host check. You can pass the path of the desktop-bundled `codex.exe` to test that particular build.
+
+```powershell
+uv sync --project panel --locked
+.\panel\.venv\Scripts\python.exe -X utf8 tests/check_shared_host.py
+```
+
 ## Submit a change
 
 Describe the user-visible change, the tests you ran, and any Windows or Codex versions needed to reproduce it. Include a screenshot with synthetic data for UI changes when it helps explain them. Keep credentials, conversation IDs and content, private paths, and local databases out of public reports.

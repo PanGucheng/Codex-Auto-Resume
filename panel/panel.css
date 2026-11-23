@@ -78,6 +78,7 @@ progress::-webkit-progress-value { border-radius: inherit; background: currentCo
 .hint { margin-top: 7px; overflow-wrap: anywhere; }
 
 .settings, fieldset { display: grid; gap: 8px; }
+.settings > label[for="destination"] { color: var(--muted); font-size: 12px; }
 fieldset { margin: 0; border: 0; padding: 0; min-width: 0; }
 legend { padding: 0; margin-bottom: 5px; color: var(--muted); font-size: 12px; }
 legend small { display: inline; margin-inline-start: 4px; }
@@ -109,7 +110,7 @@ legend small { display: inline; margin-inline-start: 4px; }
 .continuous input::before { content: ""; width: 13px; height: 13px; border-radius: 50%; background: currentColor; }
 .continuous input:checked { justify-items: end; background: var(--accent); color: var(--canvas); border-color: var(--accent); }
 
-textarea, input:not([type="checkbox"], [type="radio"]) { font: inherit; min-width: 0; width: 100%; background: var(--surface); color: var(--text); border: 1px solid var(--line); border-radius: 8px; padding: 7px 8px; }
+textarea, select, input:not([type="checkbox"], [type="radio"]) { font: inherit; min-width: 0; width: 100%; background: var(--surface); color: var(--text); border: 1px solid var(--line); border-radius: 8px; padding: 7px 8px; }
 textarea { resize: vertical; }
 #binding .row { margin-top: 5px; }
 button { display: inline-flex; justify-content: center; align-items: center; gap: 5px; border: 1px solid var(--line); border-radius: 8px; background: var(--surface); color: var(--text); font: inherit; font-size: 12px; font-weight: 650; min-height: 30px; padding: 5px 9px; white-space: nowrap; cursor: pointer; }

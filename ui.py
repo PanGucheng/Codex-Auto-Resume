@@ -27,6 +27,7 @@ STATES = {
     "scheduled": "等待触发", "preparing": "正在连接", "submitting": "正在发送",
     "accepted": "已接收 · 执行中", "completed": "已完成", "review": "需查看日志",
     "failed": "失败", "cancelled": "已取消", "unknown": "结果待核对",
+    "queued": "已入队 · 等待开跑", "queue_pending": "已入队 · 结果待核对",
     "rescheduled": "已安排下一轮", "stopped": "已停止续跑",
 }
 

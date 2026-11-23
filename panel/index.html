@@ -41,6 +41,9 @@
       </section>
       <form id="create" class="section settings">
         <h2>安排续跑</h2>
+        <label for="destination">发送到</label>
+        <select id="destination"><option value="current">当前对话</option><option value="new">到点新建对话</option></select>
+        <small id="transport"></small>
         <fieldset><legend>发送时间 <small>Windows 本地时间</small></legend>
           <div class="modes">
             <label><input type="radio" name="mode" value="quota" id="auto" checked disabled><span>额度恢复后 1 分钟</span></label>
@@ -50,9 +53,12 @@
           <input id="when" type="datetime-local" step="1" aria-label="Windows 本地发送时间" hidden>
         </fieldset>
         <label class="continuous"><span>持续续跑<small>因额度用尽中断时，等额度恢复后继续</small></span><input type="checkbox" role="switch" id="continuous"></label>
-        <details class="options">
-          <summary><svg class="icon" aria-hidden="true"><use href="#i-sliders"/></svg>发送内容与唤醒设置</summary>
+        <details class="options" id="options">
+          <summary><svg class="icon" aria-hidden="true"><use href="#i-sliders"/></svg>消息、模型与唤醒</summary>
           <div class="extras"><label for="message">发送内容</label><textarea id="message" rows="3" maxlength="16000"></textarea>
+            <label for="model">模型</label><select id="model"><option value="">沿用当前设置</option></select>
+            <label for="effort">思考强度</label><select id="effort" disabled><option value="">沿用当前设置</option></select>
+            <small id="model-status" role="status" hidden></small>
             <label class="wake"><input type="checkbox" id="wake">允许 Windows 尝试从睡眠唤醒</label></div>
         </details>
         <button class="primary" id="review" type="submit" disabled>核对并创建</button>

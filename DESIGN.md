@@ -12,8 +12,8 @@ v1.1 的 PowerShell 脚本读取 `session_index.jsonl` 和近期会话日志，�
 | --- | --- |
 | Codex 内置计划任务 | 官方支持在当前对话周期性运行。公开文档未给出从统一界面选择任意本机旧会话并在指定时间只发送一次的受支持流程。 |
 | 原生 Codex 插件 | 本地 MCP 服务使用 `thread` 入口打开对话侧栏。创建及管理计划在面板内完成，Windows 调度器负责触发。 |
-| `codex queue --resume` | 官方 CLI 能排队文本，自动恢复依赖可用的 daemon 或远端 app server。当前 Windows 上 `app-server proxy` 无法连接默认控制套接字，自动恢复失败也可能以成功退出。 |
-| Windows 窗口 + App Server stdio | Windows 调度器独立于前端。App Server 通过公开的 `thread/list`、`thread/read`、`thread/resume` 和 `turn/start` 管理会话，`turn/completed` 可区分成功、失败和中断。选用此方案。 |
+| Codex 消息队列 | 原对话沿用现有设置时默认使用。通过 `codex queue` 底层的 `thread/queue/add` 提交，持有对话的进程决定何时启动回合。 |
+| App Server 直接执行 | 新建对话和指定模型或思考强度使用此模式。需要恢复已被桌面占用的原会话时，可以使用实验性的共享 App Server。 |
 
 - [官方计划任务说明](https://learn.chatgpt.com/docs/automations?surface=app)
 - [官方插件架构](https://developers.openai.com/plugins/concepts/plugins)
@@ -24,8 +24,8 @@ v1.1 的 PowerShell 脚本读取 `session_index.jsonl` 和近期会话日志，�
 
 1. **会话选择与验证。** Python/Tk 中文窗口从 App Server 加载本机近期可见会话，支持搜索、翻页及手动输入 ID。只读验证检查该会话和它的工作目录，显示登录及配置错误。选择会话后设置本机时间和文本，提交前确认摘要。
 2. **持久化与调度。** 工具单独使用 `%LOCALAPPDATA%\CodexAutoResumeGUI` 下的 SQLite。Windows 任务以 `InteractiveToken` 和普通权限运行，支持用户已登录时锁屏触发、允许电池运行、可选唤醒与错过后补跑。命令行只传递任务 ID。取消先记录到本地状态，再注销 Windows 任务，防止竞争条件导致已取消任务发送。
-3. **发送与结果。** 定时工作进程原地恢复目标会话，向 `turn/start` 提交一次用户文本并记录 turn ID，保持 App Server 生命周期直到回合完成或超时。状态区分等待、连接、发送中、已接收、完成、失败、已取消和结果待核对。对重复启动使用原子状态转换，对同一会话的本工具后台回合使用互斥。若请求提交后连接断开，保留可见的未知状态并停止自动重试。
-4. **权限及并发。** 使用本机 Codex 已有登录和配置。后台执行器拒绝需要人工批准或介入的请求，并记录原因。App Server 是独立客户端，只能在发送前通过已存历史尽力识别正在进行的回合。使用者应让目标会话在预定时间空闲。Desktop 可能需要重新打开会话以刷新内容。
+3. **发送与结果。** 普通计划以计划 ID 作为 `clientUserMessageId` 入队。队列 RPC 需要 App Server 的 `experimentalApi` 能力，这也允许工具核对回执并通过 `thread/turns/list` 精确关联用户消息和回合，不依赖消息文本匹配。只有查到对应回合后才显示执行中，只有收到结构化额度错误才自动安排下一轮。直接执行模式通过 `thread/resume`、`turn/start` 和 `turn/completed` 追踪。两种方式都以原子状态转换防止计划重复触发，对同一会话的活跃任务使用互斥。提交后的模糊结果留给用户核对。
+4. **权限及并发。** 使用本机 Codex 已有登录和配置。队列模式的权限及审批由原对话的宿主处理。直接执行模式记录后台拒绝的人工批准或输入。不同会话可以同时运行。队列由持有者消费，未加载或已被手动中断的对话可能继续等待。已有计划保留创建时使用的执行方式。
 5. **交付。** 提供原生面板安装器、预构建插件包、双击启动器和故障排查说明。旧版计划任务仍由 Windows 任务计划程序单独管理。
 
 ## 验收

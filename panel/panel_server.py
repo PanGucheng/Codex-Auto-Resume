@@ -9,7 +9,7 @@ from mcp.server.lowlevel import Server
 from mcp.server.lowlevel.helper_types import ReadResourceContents
 from mcp.server.stdio import stdio_server
 
-from codex_client import error_text
+from codex_client import VERSION, error_text
 from panel_service import PanelService
 
 
@@ -33,22 +33,25 @@ def descriptor(name, title, properties, required, *, write=False, opening=False)
 
 
 def build_server(bundle, service):
-    server = Server("codex-auto-resume", version="1.2.0")
+    server = Server("codex-auto-resume", version=VERSION)
     bound = {"key": STRING}
     job = {**bound, "job_id": STRING}
     tools = [
         descriptor("resume_open", "Codex Auto Resume", {}, [], opening=True),
         descriptor("resume_bind", "绑定会话", {**bound, "link": STRING}, ["key"]),
         descriptor("resume_quota", "读取额度", bound, ["key"]),
+        descriptor("resume_models", "读取模型与思考强度", bound, ["key"]),
         descriptor("resume_jobs", "读取会话计划", bound, ["key"]),
         descriptor("resume_events", "查看任务日志", job, list(job)),
         descriptor("resume_create", "创建续跑计划", {
             **bound, "request_id": STRING, "mode": {"enum": ["quota", "manual"]},
             "when": {"type": ["string", "integer"]}, "message": STRING, "wake": BOOLEAN, "continuous": BOOLEAN,
+            "new_chat": BOOLEAN, "model": STRING, "effort": STRING,
         }, ["key", "request_id", "mode", "when", "message", "wake", "continuous"], write=True),
         descriptor("resume_stop", "停止续跑计划", {**job, "action": {"enum": ["stop", "cancel"]}}, [*job, "action"], write=True),
     ]
-    handlers = {f"resume_{name}": getattr(service, name) for name in ("bind", "quota", "jobs", "events", "create", "stop")}
+    handlers = {f"resume_{name}": getattr(service, name)
+                for name in ("bind", "quota", "models", "jobs", "events", "create", "stop")}
 
     @server.list_tools()
     async def list_tools():

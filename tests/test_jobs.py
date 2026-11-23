@@ -1,12 +1,15 @@
+from concurrent.futures import ThreadPoolExecutor
 import sqlite3
 from pathlib import Path
 import tempfile
+from threading import Barrier
 import time
 import unittest
 from unittest.mock import ANY, call, patch
+from uuid import uuid4
 
 from codex_client import CodexError, CodexQuota, Connection, QuotaWindow, RequestError
-from jobs import JobStore, run_job, task_name
+from jobs import JobOptions, JobStore, run_job, task_name
 
 
 class JobTests(unittest.TestCase):
@@ -20,8 +23,9 @@ class JobTests(unittest.TestCase):
         self.scheduler = patcher.start()
         self.addCleanup(patcher.stop)
 
-    def schedule(self, due=True, continuous=False):
-        job = self.store.schedule(self.connection, self.thread, "继续任务\n保留换行", time.time() + 300, True, continuous)
+    def schedule(self, due=True, continuous=False, use_queue=False):
+        job = self.store.schedule(self.connection, self.thread, "继续任务\n保留换行", time.time() + 300, True,
+                                  continuous, options=JobOptions(use_queue=use_queue))
         if due:
             with self.store.db() as db:
                 db.execute("UPDATE jobs SET scheduled_at = ? WHERE id = ?", (time.time() - 1, job))
@@ -68,6 +72,60 @@ class JobTests(unittest.TestCase):
         server.wait_turn.assert_called_once_with(self.thread["id"], "turn-1", timeout=ANY)
         self.assertEqual(self.store.get(job)["state"], "completed")
 
+    def test_queued_job_tracks_exact_turn_and_does_not_resume_or_submit_twice(self):
+        self.thread["id"] = str(uuid4())
+        job = self.schedule(use_queue=True)
+        _, server = self.fake_server()
+        server.add_queued_message.return_value = "queue-receipt"
+
+        observations = iter([
+            {"id": "turn-1", "status": "interrupted", "completedAt": None},
+            {"id": "turn-1", "status": "completed", "completedAt": int(time.time())},
+        ])
+
+        def find_turn(thread, message, since, turn=None):
+            self.assertEqual((thread, message), (self.thread["id"], job))
+            self.assertEqual(self.store.get(job)["state"], "accepted" if turn else "queued")
+            return next(observations)
+
+        server.find_queued_turn.side_effect = find_turn
+        with patch("jobs.time.sleep"):
+            self.assertEqual(run_job(self.store, job), 0)
+            self.assertEqual(run_job(self.store, job), 0)
+        server.add_queued_message.assert_called_once_with(self.thread["id"], "继续任务\n保留换行", job)
+        server.start_turn.assert_not_called()
+        server.request.assert_not_called()
+        self.assertEqual(self.store.get(job)["state"], "completed")
+        self.assertEqual(self.store.get(job)["turn_id"], "turn-1")
+
+    def test_queued_quota_failure_schedules_next_round_through_the_queue(self):
+        job = self.schedule(continuous=True, use_queue=True)
+        _, server = self.fake_server()
+        server.find_queued_turn.return_value = {"id": "turn-1", "status": "failed",
+                                               "completedAt": int(time.time()),
+                                               "error": {"codexErrorInfo": "usageLimitExceeded"}}
+        reset = int(time.time()) + 600
+        server.read_quota.return_value = CodexQuota(QuotaWindow(100, reset), None)
+        self.assertEqual(run_job(self.store, job), 0)
+        next_job, previous = self.store.all()
+        self.assertEqual(previous["state"], "rescheduled")
+        self.assertEqual(next_job["parent_id"], job)
+        self.assertEqual(next_job["scheduled_at"], reset + 60)
+        self.assertTrue(next_job["uses_queue"])
+
+    def test_queue_ack_without_a_turn_stays_unconfirmed_and_never_resends(self):
+        job = self.schedule(continuous=True, use_queue=True)
+        _, server = self.fake_server()
+        server.find_queued_turn.return_value = None
+        server.has_queued_message.return_value = True
+        with patch("jobs.RUN_LIMIT_SECONDS", 0):
+            self.assertEqual(run_job(self.store, job), 0)
+            self.assertEqual(run_job(self.store, job), 0)
+        self.assertEqual(self.store.get(job)["state"], "queue_pending")
+        self.assertEqual(len(self.store.all()), 1)
+        server.add_queued_message.assert_called_once()
+        server.read_quota.assert_not_called()
+
     def test_disconnect_after_submission_is_unknown_and_is_not_retried(self):
         job = self.schedule()
         _, server = self.fake_server()
@@ -95,6 +153,57 @@ class JobTests(unittest.TestCase):
             self.assertEqual(self.store.get(first)["state"], "submitting")
         self.store.reconcile_workers()
         self.assertEqual(self.store.get(first)["state"], "unknown")
+
+    def test_workers_for_distinct_conversations_can_run_at_the_same_time(self):
+        second_thread = {**self.thread, "id": "thread-2", "name": "第二个会话"}
+        targets = {self.thread["id"]: "第一条消息", second_thread["id"]: "第二条消息"}
+        at = time.time() + 300
+        job_ids = [self.store.schedule(self.connection, thread, targets[thread["id"]], at, False, True)
+                   for thread in (self.thread, second_thread)]
+        with self.store.db() as db:
+            db.executemany("UPDATE jobs SET scheduled_at = ? WHERE id = ?",
+                           [(time.time() - 1, job_id) for job_id in job_ids])
+        both_running = Barrier(2, timeout=10)
+
+        def send(store, job):
+            self.assertEqual(job["message"], targets[job["thread_id"]])
+            self.assertEqual(store.get(job["id"])["state"], "preparing")
+            both_running.wait()
+            self.assertTrue(store.transition(job["id"], "preparing", "completed", "test completion"))
+            return 0
+
+        with patch("jobs.send_job", side_effect=send) as dispatch, ThreadPoolExecutor(2) as pool:
+            results = [pool.submit(run_job, self.store, job_id) for job_id in job_ids]
+            self.assertEqual([result.result() for result in results], [0, 0])
+            self.assertEqual(dispatch.call_count, 2)
+        self.assertEqual([self.store.get(job_id)["state"] for job_id in job_ids], ["completed", "completed"])
+
+    def test_new_chat_keeps_its_destination_transport_and_model_after_quota(self):
+        connection = Connection(self.connection.home, shared=True)
+        options = JobOptions(new_chat=True, model="test-model", effort="high")
+        first = self.store.schedule(connection, self.thread, "  new chat message\n", time.time() + 300, False,
+                                    True, options=options)
+        with self.store.db() as db:
+            db.execute("UPDATE jobs SET scheduled_at = ? WHERE id = ?", (time.time() - 1, first))
+        target, server = self.fake_server()
+        server.request.return_value = {"thread": {"id": "new-chat", "ephemeral": False}}
+        server.wait_turn.return_value = {"status": "failed", "error": {"codexErrorInfo": "usageLimitExceeded"}}
+        reset = int(time.time()) + 600
+        server.read_quota.return_value = CodexQuota(QuotaWindow(100, reset), None)
+
+        self.assertEqual(run_job(self.store, first), 0)
+        target.assert_not_called()
+        server.request.assert_called_once_with("thread/start", {"cwd": self.thread["cwd"], "ephemeral": False,
+                                                                  "model": "test-model"}, timeout=60)
+        server.start_turn.assert_called_once_with("new-chat", "  new chat message\n", model="test-model", effort="high")
+        followup, parent = self.store.for_thread(connection.home, self.thread["id"])
+        self.assertEqual(parent["state"], "rescheduled")
+        self.assertEqual(followup["parent_id"], first)
+        self.assertEqual(followup["thread_id"], "new-chat")
+        self.assertFalse(followup["new_chat"])
+        self.assertTrue(followup["shared"])
+        self.assertFalse(followup["uses_queue"])
+        self.assertEqual((followup["model"], followup["effort"], followup["scheduled_at"]), ("test-model", "high", reset + 60))
 
     def test_continuation_uses_later_exhausted_window_and_stops_after_a_successful_round(self):
         job = self.schedule(continuous=True)

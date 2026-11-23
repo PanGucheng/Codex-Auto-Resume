@@ -1,6 +1,6 @@
 {
   "name": "codex-auto-resume-panel",
-  "version": "1.2.2",
+  "version": "1.4.1",
   "private": true,
   "type": "module",
   "scripts": {
@@ -9,7 +9,7 @@
   },
   "dependencies": {
     "@modelcontextprotocol/ext-apps": "1.7.5",
-    "@modelcontextprotocol/sdk": "1.29.0"
+    "@modelcontextprotocol/sdk": "1.32.2"
   },
   "devDependencies": {
     "esbuild": "0.25.12",

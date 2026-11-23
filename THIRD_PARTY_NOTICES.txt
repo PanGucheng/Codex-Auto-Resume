@@ -218,7 +218,7 @@ Documentation in this project (excluding specifications) is licensed under
 CC-BY-4.0. See https://creativecommons.org/licenses/by/4.0/legalcode for
 the full license text.
 
-@modelcontextprotocol/sdk 1.29.0
+@modelcontextprotocol/sdk 1.32.2
 MIT License
 
 Copyright (c) 2024 Anthropic, PBC

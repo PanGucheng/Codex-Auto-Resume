@@ -3,29 +3,36 @@ import { App, applyDocumentTheme, applyHostStyleVariables } from "@modelcontextp
 type WindowQuota = { used_percent: number; resetLocal: string | null };
 type Quota = { five_hours: WindowQuota | null; weekly: WindowQuota | null;
   suggestion: { epoch: number; local: string } | null; reason: string | null };
-type Job = { id: string; state: string; scheduledLocal: string; continuous: boolean; action: "cancel" | "stop" | null };
-type Bound = { state: "bound"; title: string; id: string } | { state: "unbound"; reason: string };
+type Job = { id: string; state: string; scheduledLocal: string; continuous: boolean; newChat: boolean; action: "cancel" | "stop" | null };
+type Bound = { state: "bound"; title: string; id: string; cwd: string; shared: boolean } | { state: "unbound"; reason: string };
+type Model = { id: string; label: string; defaultEffort: string | null; efforts: string[] };
 type Draft = { request_id: string; mode: "quota" | "manual"; when: string | number;
-  message: string; wake: boolean; continuous: boolean };
+  message: string; wake: boolean; continuous: boolean; new_chat: boolean; model: string; effort: string };
 type Created = { state: "created"; job: Job } | { state: "quota_changed"; quota: Quota };
 type JobEvents = { message: string; events: { at: string; detail: string }[] };
 
 const states: Record<string, string> = {
   scheduled: "等待触发", preparing: "正在连接", submitting: "正在发送", accepted: "执行中",
+  queued: "已入队 · 等待开跑", queue_pending: "已入队 · 结果待核对",
   completed: "已完成", review: "需查看日志", failed: "失败", cancelled: "已取消",
   unknown: "结果待核对", rescheduled: "已安排下一轮", stopped: "已停止续跑",
 };
 const el = <T extends HTMLElement = HTMLElement>(id: string) => document.getElementById(id) as T;
 const input = (id: string) => el<HTMLInputElement>(id);
+const select = (id: string) => el<HTMLSelectElement>(id);
 const button = (id: string) => el<HTMLButtonElement>(id);
 const dialog = el<HTMLDialogElement>("confirmation");
-const app = new App({ name: "Codex Auto Resume", version: "1.2.2" });
+const app = new App({ name: "Codex Auto Resume", version: "1.4.1" });
 let key = "";
 let bindingRevision = 0;
 let jobsRevision = 0;
 let quota: Quota | null = null;
 let draft: Draft | null = null;
 let confirmAction: (() => Promise<void>) | null = null;
+let bound: Extract<Bound, { state: "bound" }> | null = null;
+let models: Model[] = [];
+let modelsRead = false;
+const effortLabels: Record<string, string> = { low: "低", medium: "中", high: "高", xhigh: "极高", max: "最高", ultra: "Ultra" };
 
 function notice(message: string, error = false) {
   el("notice").textContent = message;
@@ -53,6 +60,45 @@ function updateForm() {
   input("when").hidden = !manual;
   input("when").required = manual;
   button("review").disabled = manual ? !input("when").value : !quota?.suggestion;
+}
+
+function updateDestination() {
+  const newChat = select("destination").value === "new";
+  const transport = el("transport");
+  if (newChat) transport.textContent = "通过 App Server 在当前工作目录新建对话。";
+  else if (select("model").value) transport.textContent = bound?.shared ? "通过共享 App Server 使用指定设置。"
+    : "使用指定设置时走 App Server。原对话被桌面占用时需要共享模式。";
+  else transport.textContent = "通过 Codex 队列发送，沿用对话的模型和思考强度。";
+  select("model").options[0].text = newChat ? "使用账号默认模型" : "沿用当前对话设置";
+}
+
+function updateEfforts() {
+  const model = models.find(item => item.id === select("model").value);
+  const name = model?.defaultEffort;
+  const label = name ? `模型默认（${effortLabels[name] ?? name}）` : "沿用默认强度";
+  select("effort").replaceChildren(new Option(label, ""),
+    ...(model?.efforts ?? []).map(value => new Option(effortLabels[value] ?? value, value)));
+  select("effort").disabled = !model?.efforts.length;
+}
+
+async function loadModels() {
+  if (!bound || modelsRead) return;
+  modelsRead = true;
+  const revision = bindingRevision;
+  const status = el("model-status");
+  status.hidden = false;
+  status.textContent = "正在读取可用模型…";
+  try {
+    const result = await call<{ models: Model[] }>("resume_models");
+    if (revision !== bindingRevision) return;
+    models = result.models;
+    select("model").append(...models.map(item => new Option(item.label, item.id)));
+    status.hidden = true;
+  } catch (error) {
+    if (revision !== bindingRevision) return;
+    status.textContent = explain(error);
+    modelsRead = false;
+  }
 }
 
 function renderQuota(result: Quota) {
@@ -97,7 +143,8 @@ function setConfirmation(title: string, description: string, label: string, acti
 function stopJob(job: Job) {
   const label = job.action === "cancel" ? "取消计划" : "停止后续续跑";
   const revision = bindingRevision;
-  setConfirmation(label, `${el("title").textContent}\n${job.scheduledLocal}\n${job.action === "stop" ? "当前回合会正常结束。" : "确认取消这条等待中的计划？"}`, label, async () => {
+  const detail = job.action === "stop" ? "本轮仍由 Codex 处理。" : "确认取消这条等待中的计划？";
+  setConfirmation(label, `${el("title").textContent}\n${job.scheduledLocal}\n${detail}`, label, async () => {
     await call("resume_stop", { job_id: job.id, action: job.action });
     if (revision !== bindingRevision) return;
     dialog.close();
@@ -109,8 +156,8 @@ function stopJob(job: Job) {
 function renderJobs(jobs: Job[]) {
   const next = jobs.filter(job => job.state === "scheduled").sort((a, b) => a.scheduledLocal.localeCompare(b.scheduledLocal))[0];
   const stoppable = next ?? jobs.find(job => job.action === "stop");
-  const running = jobs.some(job => ["preparing", "submitting", "accepted"].includes(job.state));
-  el("next-time").textContent = next?.scheduledLocal ?? (running ? "当前回合执行中" : "暂无计划");
+  const active = jobs.find(job => ["preparing", "submitting", "queued", "accepted"].includes(job.state));
+  el("next-time").textContent = next?.scheduledLocal ?? (active ? states[active.state] : "暂无计划");
   button("next-action").hidden = !stoppable;
   button("next-action").textContent = stoppable?.action === "stop" ? "停止后续" : "取消计划";
   button("next-action").onclick = stoppable ? () => stopJob(stoppable) : null;
@@ -134,7 +181,10 @@ function renderJobs(jobs: Job[]) {
       details.ontoggle = () => { if (details.open) void loadEvents(job.id, log); };
       item.append(summary, details);
     }
-    item.querySelector("span")!.textContent = `${job.scheduledLocal} · ${states[job.state] ?? job.state}${job.continuous ? " · 持续" : ""}`;
+    item.querySelector("span")!.textContent = `${job.scheduledLocal} · ${states[job.state] ?? job.state}${job.continuous ? " · 持续" : ""}${job.newChat ? " · 新对话" : ""}`;
+    const details = item.querySelector("details")!;
+    if (details.open && item.dataset.state !== job.state) void loadEvents(job.id, details.querySelector("pre")!);
+    item.dataset.state = job.state;
     const action = item.querySelector("button")!;
     action.hidden = !job.action;
     action.textContent = job.action === "stop" ? "停止后续" : "取消";
@@ -185,9 +235,12 @@ async function bind(link?: string) {
     }
     el("title").textContent = result.title;
     el("title").title = result.id;
+    bound = result;
+    updateDestination();
     el("workspace").hidden = false;
     notice("");
     await Promise.all([refreshQuota(revision), refreshJobs()]);
+    if (el<HTMLDetailsElement>("options").open) void loadModels();
   } catch (error) {
     if (revision === bindingRevision) { form.hidden = false; notice(explain(error), true); }
   } finally {
@@ -197,7 +250,9 @@ async function bind(link?: string) {
 
 function confirmDraft(current: Draft, shownTime: string) {
   const revision = bindingRevision;
-  setConfirmation("确认续跑计划", `${el("title").textContent}\n${shownTime}（Windows 本地时间）\n${current.continuous ? "持续续跑" : "执行一次"}\n\n${current.message}`, "确认创建", async () => {
+  const target = current.new_chat ? `到点新建对话\n${bound?.cwd ?? ""}` : el("title").textContent;
+  const settings = current.model ? `\n${models.find(item => item.id === current.model)?.label ?? current.model} · ${effortLabels[current.effort] ?? (current.effort || "默认")}` : "";
+  setConfirmation("确认续跑计划", `${target}\n${shownTime}（Windows 本地时间）\n${current.continuous ? "持续续跑" : "执行一次"}${settings}\n\n${current.message}`, "确认创建", async () => {
     const result = await call<Created>("resume_create", current);
     if (revision !== bindingRevision) return;
     if (result.state === "quota_changed") {
@@ -222,8 +277,12 @@ el<HTMLFormElement>("create").onsubmit = event => {
   const message = el<HTMLTextAreaElement>("message").value;
   if (!message.trim()) { notice("请输入发送内容。", true); return; }
   const when = manual ? input("when").value : suggestion!.epoch;
+  const model = models.find(item => item.id === select("model").value);
+  const defaultEffort = model?.defaultEffort;
   const payload = { mode: manual ? "manual" as const : "quota" as const, when, message,
-    continuous: input("continuous").checked, wake: input("wake").checked };
+    continuous: input("continuous").checked, wake: input("wake").checked,
+    new_chat: select("destination").value === "new", model: model?.id ?? "",
+    effort: select("effort").value || (defaultEffort && model?.efforts.includes(defaultEffort) ? defaultEffort : "") };
   const sameDraft = draft && Object.entries(payload).every(([k, value]) => draft?.[k as keyof Draft] === value);
   draft = { request_id: sameDraft ? draft!.request_id : crypto.randomUUID(), ...payload };
   confirmDraft(draft, manual ? String(when).replace("T", " ") : suggestion!.local);
@@ -246,6 +305,9 @@ button("confirm").onclick = async () => {
 el<HTMLFormElement>("binding").onsubmit = event => { event.preventDefault(); void bind(input("link").value.trim()); };
 button("refresh").onclick = () => void refreshQuota();
 input("auto").onchange = input("manual").onchange = input("when").oninput = updateForm;
+select("destination").onchange = updateDestination;
+select("model").onchange = () => { updateEfforts(); updateDestination(); };
+el<HTMLDetailsElement>("options").ontoggle = () => { if (el<HTMLDetailsElement>("options").open) void loadModels(); };
 
 function styleHost(context: ReturnType<typeof app.getHostContext>) {
   if (context?.theme) applyDocumentTheme(context.theme);
@@ -257,6 +319,12 @@ app.ontoolresult = result => {
   if (typeof metadata?.binding !== "string" || metadata.binding === key) return;
   key = metadata.binding;
   quota = draft = null;
+  bound = null;
+  models = [];
+  modelsRead = false;
+  select("destination").value = "current";
+  select("model").replaceChildren(new Option("沿用当前对话设置", ""));
+  updateEfforts();
   el("workspace").hidden = el("binding").hidden = true;
   el("title").textContent = "Codex Auto Resume";
   el("title").title = "";

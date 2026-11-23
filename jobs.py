@@ -1,6 +1,7 @@
 """Job storage, Windows scheduler, and the scheduled worker."""
 
 from contextlib import closing, contextmanager
+from dataclasses import dataclass
 from datetime import datetime
 import json
 import msvcrt
@@ -19,10 +20,24 @@ from codex_client import (AppServer, CodexError, Connection, MIN_SCHEDULE_LEAD_S
 APP_DIR = Path(__file__).resolve().parent
 DEFAULT_MESSAGE = "继续完成之前的任务，不要停，直到当前计划完成。"
 RUN_LIMIT_SECONDS = 12 * 60 * 60
-RUNNING_STATES = ("preparing", "submitting", "accepted")
+QUEUE_POLL_SECONDS = 8
+RUNNING_STATES = ("preparing", "submitting", "queued", "accepted")
 TASK_PREFIX = "CodexAutoResumeGUI_"
 ACTIVE_GOAL_STATES = ("active", "usageLimited")
-JOB_COLUMNS = "jobs.*, c.job_id IS NOT NULL AS continuous, c.enabled AS continue_enabled, c.goal_key, c.parent_id"
+JOB_COLUMNS = """jobs.*, c.job_id IS NOT NULL AS continuous, c.enabled AS continue_enabled, c.goal_key, c.parent_id,
+                 q.job_id IS NOT NULL AS uses_queue,
+                 COALESCE(o.shared, 0) AS shared, COALESCE(o.new_chat, 0) AS new_chat, o.scope_thread_id, o.model, o.effort"""
+JOB_JOINS = """FROM jobs LEFT JOIN continuations c ON c.job_id = jobs.id
+               LEFT JOIN job_options o ON o.job_id = jobs.id LEFT JOIN queue_deliveries q ON q.job_id = jobs.id"""
+
+
+@dataclass(frozen=True)
+class JobOptions:
+    new_chat: bool = False
+    model: str | None = None
+    effort: str | None = None
+    scope_thread_id: str | None = None
+    use_queue: bool = True
 
 
 def default_data_dir():
@@ -102,9 +117,20 @@ class JobStore:
                     fingerprint TEXT NOT NULL,
                     job_id TEXT NOT NULL REFERENCES jobs(id)
                 );
+                CREATE TABLE IF NOT EXISTS job_options (
+                    job_id TEXT PRIMARY KEY REFERENCES jobs(id),
+                    shared INTEGER NOT NULL,
+                    new_chat INTEGER NOT NULL,
+                    scope_thread_id TEXT,
+                    model TEXT,
+                    effort TEXT
+                );
+                CREATE TABLE IF NOT EXISTS queue_deliveries (
+                    job_id TEXT PRIMARY KEY REFERENCES jobs(id)
+                );
                 CREATE INDEX IF NOT EXISTS job_events ON events(job_id, seq);
-                CREATE UNIQUE INDEX IF NOT EXISTS active_thread_job ON jobs(codex_home, thread_id)
-                    WHERE state IN ('preparing', 'submitting', 'accepted');
+                CREATE UNIQUE INDEX IF NOT EXISTS active_thread_job_with_queue ON jobs(codex_home, thread_id)
+                    WHERE state IN ('preparing', 'submitting', 'queued', 'accepted');
             """)
 
     @contextmanager
@@ -126,20 +152,20 @@ class JobStore:
 
     def get(self, job_id):
         with self.db() as db:
-            return db.execute(f"SELECT {JOB_COLUMNS} FROM jobs LEFT JOIN continuations c ON c.job_id = jobs.id WHERE jobs.id = ?",
+            return db.execute(f"SELECT {JOB_COLUMNS} {JOB_JOINS} WHERE jobs.id = ?",
                               (job_id,)).fetchone()
 
     def all(self):
         with self.db() as db:
-            return db.execute(f"SELECT {JOB_COLUMNS} FROM jobs LEFT JOIN continuations c ON c.job_id = jobs.id ORDER BY created_at DESC").fetchall()
+            return db.execute(f"SELECT {JOB_COLUMNS} {JOB_JOINS} ORDER BY created_at DESC").fetchall()
 
     def for_thread(self, home, thread_id):
         with self.db() as db:
             return db.execute(f"""
-                SELECT {JOB_COLUMNS} FROM jobs LEFT JOIN continuations c ON c.job_id = jobs.id
-                WHERE codex_home = ? COLLATE NOCASE AND thread_id = ?
-                ORDER BY (state IN ('scheduled', 'preparing', 'submitting', 'accepted')) DESC, created_at DESC LIMIT 30
-            """, (home, thread_id)).fetchall()
+                SELECT {JOB_COLUMNS} {JOB_JOINS}
+                WHERE codex_home = ? COLLATE NOCASE AND (thread_id = ? OR o.scope_thread_id = ?)
+                ORDER BY (state IN ('scheduled', 'preparing', 'submitting', 'queued', 'accepted')) DESC, created_at DESC LIMIT 30
+            """, (home, thread_id, thread_id)).fetchall()
 
     def events(self, job_id):
         with self.db() as db:
@@ -180,26 +206,28 @@ class JobStore:
         with self.db() as db:
             return self._submitted_job(db, request)
 
-    def schedule(self, connection, thread, message, scheduled_at, wake, continuous=False, request=None):
+    def schedule(self, connection, thread, message, scheduled_at, wake, continuous=False, request=None,
+                 *, options=JobOptions()):
         with self.db() as db:
             if continuous or request:
                 db.execute("BEGIN IMMEDIATE")
             if request and (existing_job := self._submitted_job(db, request)):
                 return existing_job
-            if continuous:
+            if continuous and not options.new_chat:
                 existing = db.execute("""
                     SELECT 1 FROM jobs JOIN continuations c ON c.job_id = jobs.id
                     WHERE codex_home = ? AND thread_id = ? AND c.enabled = 1
-                    AND state IN ('scheduled', 'preparing', 'submitting', 'accepted')
+                    AND state IN ('scheduled', 'preparing', 'submitting', 'queued', 'accepted')
                 """, (connection.home, validate_thread_id(thread["id"]))).fetchone()
                 if existing:
                     raise ValueError("这个会话已有持续续跑计划。可在任务记录中查看或停止。")
-            job_id = self._register(db, connection, thread, message, scheduled_at, wake, continuous)
+            job_id = self._register(db, connection, thread, message, scheduled_at, wake, continuous, options=options)
             if request:
                 db.execute("INSERT INTO panel_requests VALUES (?, ?, ?)", (*request, job_id))
             return job_id
 
-    def _register(self, db, connection, thread, message, scheduled_at, wake, continuous, parent_id=None, goal_key=None):
+    def _register(self, db, connection, thread, message, scheduled_at, wake, continuous, parent_id=None, goal_key=None,
+                  *, options=JobOptions()):
         if scheduled_at - time.time() < MIN_SCHEDULE_LEAD_SECONDS:
             raise ValueError("发送时间至少晚于现在 20 秒。")
         if not message.strip():
@@ -209,7 +237,8 @@ class JobStore:
         job_id = uuid.uuid4().hex
         now = time.time()
         thread_id = validate_thread_id(thread["id"])
-        pythonw = Path(sys.base_prefix) / "pythonw.exe"
+        scope = options.scope_thread_id or (thread_id if options.new_chat else None)
+        pythonw = Path(sys.executable).with_name("pythonw.exe") if connection.shared else Path(sys.base_prefix) / "pythonw.exe"
         if not pythonw.is_file():
             pythonw = Path(sys.executable).with_name("pythonw.exe")
         if not pythonw.is_file():
@@ -217,8 +246,14 @@ class JobStore:
         db.execute("""
             INSERT INTO jobs (id, thread_id, title, cwd, message, scheduled_at, created_at, codex_home, codex_path, state, updated_at)
             VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, 'registering', ?)
-        """, (job_id, thread_id, thread_title(thread), thread["cwd"], message,
+        """, (job_id, job_id if options.new_chat else thread_id,
+              "定时新对话" if options.new_chat else thread_title(thread), thread["cwd"], message,
               scheduled_at, now, connection.home, connection.executable, now))
+        if connection.shared or options.new_chat or scope or options.model or options.effort:
+            db.execute("INSERT INTO job_options VALUES (?, ?, ?, ?, ?, ?)",
+                       (job_id, connection.shared, options.new_chat, scope, options.model, options.effort))
+        if options.use_queue and not (options.new_chat or options.model or options.effort):
+            db.execute("INSERT INTO queue_deliveries VALUES (?)", (job_id,))
         if continuous:
             db.execute("INSERT INTO continuations (job_id, parent_id, wake, goal_key) VALUES (?, ?, ?, ?)",
                        (job_id, parent_id, wake, goal_key))
@@ -233,9 +268,15 @@ class JobStore:
         self._transition(db, job_id, "registering", "scheduled", "已注册。到点由 Windows 启动。")
         return job_id
 
-    def schedule_followup(self, job, previous, scheduled_at, goal_key, reason):
+    def assign_new_chat(self, job_id, thread_id):
+        with self.db() as db:
+            db.execute("UPDATE jobs SET thread_id = ? WHERE id = ? AND state = 'preparing'", (thread_id, job_id))
+            db.execute("UPDATE job_options SET new_chat = 0 WHERE job_id = ?", (job_id,))
+            self._event(db, job_id, f"已新建会话。会话 ID {thread_id}")
+
+    def schedule_followup(self, job, previous, scheduled_at, goal_key, reason, *, recreate=False):
         job_id = job["id"]
-        connection = Connection(job["codex_home"], job["codex_path"])
+        connection = Connection(job["codex_home"], job["codex_path"], bool(job["shared"]))
         thread = {"id": job["thread_id"], "name": job["title"], "cwd": job["cwd"]}
         with self.db() as db:
             db.execute("BEGIN IMMEDIATE")
@@ -247,19 +288,21 @@ class JobStore:
             if not self._transition(db, job_id, previous, "rescheduled", f"{reason} 下一轮计划 {next_time}。"):
                 return
             self._register(db, connection, thread, job["message"], scheduled_at, bool(options["wake"]),
-                           True, parent_id=job_id, goal_key=goal_key)
+                           True, parent_id=job_id, goal_key=goal_key,
+                           options=JobOptions(recreate, job["model"], job["effort"], job["scope_thread_id"],
+                                              use_queue=bool(job["uses_queue"])))
 
     def stop_followups(self, job_id):
         with self.db() as db:
             result = db.execute("""
                 UPDATE continuations SET enabled = 0 WHERE job_id = ? AND enabled = 1 AND EXISTS (
-                    SELECT 1 FROM jobs WHERE id = ? AND state IN ('preparing', 'submitting', 'accepted')
+                    SELECT 1 FROM jobs WHERE id = ? AND state IN ('preparing', 'submitting', 'queued', 'accepted')
                 )
             """, (job_id, job_id))
             if not result.rowcount:
                 raise RuntimeError("本轮已结束或后续续跑已停止。可在任务记录取消下一条等待中的计划。")
             db.execute("UPDATE jobs SET updated_at = ? WHERE id = ?", (time.time(), job_id))
-            self._event(db, job_id, "已停止安排后续轮次。当前回合按原流程结束。")
+            self._event(db, job_id, "已停止安排后续轮次。本轮交给 Codex 继续处理。")
 
     def cancel(self, job_id):
         if not self.transition(job_id, "scheduled", "cancelled", "已取消，后台进程不会发送。"):
@@ -290,7 +333,7 @@ class JobStore:
 
     def reconcile_workers(self):
         with self.db() as db:
-            active_ids = db.execute("SELECT id FROM jobs WHERE state IN ('preparing','submitting','accepted')").fetchall()
+            active_ids = db.execute("SELECT id FROM jobs WHERE state IN ('preparing','submitting','queued','accepted')").fetchall()
         for active in active_ids:
             job_id = active["id"]
             with self.worker_lock(job_id) as acquired:
@@ -298,8 +341,11 @@ class JobStore:
                     continue
                 row = self.get(job_id)
                 if row["state"] in RUNNING_STATES:
-                    new = "failed" if row["state"] == "preparing" else "unknown"
-                    self.transition(job_id, row["state"], new, "后台进程已退出。请查看目标会话与任务日志。")
+                    if row["state"] == "queued":
+                        self.transition(job_id, "queued", "queue_pending", "监控进程已退出。消息已入队，请在原对话核对后续结果。")
+                    else:
+                        new = "failed" if row["state"] == "preparing" else "unknown"
+                        self.transition(job_id, row["state"], new, "后台进程已退出。请查看目标会话与任务日志。")
 
 
 def thread_title(thread):
@@ -320,7 +366,7 @@ def run_job(store, job_id):
             store.log(job_id, "忽略早于计划时间的触发。")
             return 0
         try:
-            claimed = store.transition(job_id, "scheduled", "preparing", "已触发，正在检查和恢复原会话。")
+            claimed = store.transition(job_id, "scheduled", "preparing", "已触发，正在核对目标会话。")
         except sqlite3.IntegrityError:
             store.transition(job_id, "scheduled", "failed", "该会话已有本工具启动的回合。")
             return 2
@@ -346,28 +392,110 @@ def goal_stop(goal, expected_key):
     return None
 
 
-def reschedule_after_quota(store, job, server, previous, key):
+def reschedule_after_quota(store, job, server, previous, key, *, recreate=False):
     job_id = job["id"]
     try:
         if not store.get(job_id)["continue_enabled"]:
             store.transition(job_id, previous, "stopped", "已按用户要求停止后续续跑。")
             return 0
-        goal = server.read_goal(job["thread_id"])
-        stopped = goal_stop(goal, key)
-        if stopped:
-            store.transition(job_id, previous, *stopped)
-            return 0
+        if not recreate:
+            goal = server.read_goal(job["thread_id"])
+            stopped = goal_stop(goal, key)
+            if stopped:
+                store.transition(job_id, previous, *stopped)
+                return 0
         next_run = server.read_quota().resume_time(time.time())
-        store.schedule_followup(job, previous, next_run, key, "本轮遇到 Codex 额度限制。")
+        store.schedule_followup(job, previous, next_run, key, "本轮遇到 Codex 额度限制。", recreate=recreate)
         return 0
     except Exception as exc:
         store.transition(job_id, previous, "review", f"后续轮次未能安排。{error_text(exc)}")
         return 2
 
 
+def finish_turn(store, job, server, state, key, turn, refused=False):
+    job_id = job["id"]
+    reason = turn.get("error") or {}
+    quota_hit = is_usage_limit_error(reason)
+    if job["continuous"] and not refused and quota_hit:
+        return reschedule_after_quota(store, job, server, state, key)
+    if turn.get("status") == "completed" and not quota_hit:
+        detail = "Codex 回合已完成。"
+        if refused:
+            detail += " 本次执行有交互请求被拒绝，请看上方记录。"
+        elif job["continuous"]:
+            detail += " 持续续跑结束。"
+        store.transition(job_id, state, "review" if refused else "completed", detail)
+        return 0
+    detail = reason.get("message") or turn.get("status") or "未知状态"
+    store.transition(job_id, state, "failed", "Codex 回合未完成。" + error_text(detail))
+    return 2
+
+
+def send_queued_job(store, job, connection):
+    job_id, thread_id = job["id"], job["thread_id"]
+    state, key, turn_id = "preparing", None, None
+    try:
+        cwd = read_local_target(connection, thread_id)["cwd"]
+        with AppServer(connection, cwd=cwd, experimental=True) as server:
+            server.check_account()
+            if job["continuous"]:
+                goal = server.read_goal(thread_id)
+                if stopped := goal_stop(goal, job["goal_key"]):
+                    store.transition(job_id, state, *stopped)
+                    return 0
+                key = goal_key(goal)
+            try:
+                server.has_queued_message(thread_id, job_id)
+            except RequestError as exc:
+                if exc.code in (-32601, -32600):
+                    raise CodexError("这版 Codex 不支持队列续跑。请更新 Windows 桌面端后重新安排。") from exc
+                raise
+            store.transition(job_id, state, "submitting", "正在把消息提交到原对话的 Codex 队列。")
+            state = "submitting"
+            try:
+                receipt = server.add_queued_message(thread_id, job["message"], job_id)
+            except RequestError as exc:
+                if exc.code not in (-32600, -32601, -32602):
+                    raise
+                store.transition(job_id, state, "failed", error_text(exc))
+                return 2
+            store.transition(job_id, state, "queued", f"Codex 已确认入队。等待原对话开启回合。队列编号 {receipt}")
+            state = "queued"
+            deadline = time.monotonic() + RUN_LIMIT_SECONDS
+            while True:
+                turn = server.find_queued_turn(thread_id, job_id, job["scheduled_at"] - 5, turn_id)
+                if turn and turn.get("id"):
+                    if state == "queued":
+                        turn_id = turn["id"]
+                        store.transition(job_id, state, "accepted", f"原对话已开启回合。Turn ID {turn_id}", turn_id)
+                        state = "accepted"
+                    # A separate App Server can label an open history record as
+                    # interrupted. Only a recorded end time confirms completion.
+                    if turn.get("completedAt") is not None and turn.get("status") in ("completed", "failed", "interrupted"):
+                        return finish_turn(store, job, server, state, key, turn)
+                remaining = deadline - time.monotonic()
+                if remaining <= 0:
+                    break
+                time.sleep(min(QUEUE_POLL_SECONDS, remaining))
+            if state == "queued" and server.has_queued_message(thread_id, job_id):
+                store.transition(job_id, state, "queue_pending", "监控时限已到，消息仍在原对话的 Codex 队列。")
+                return 0
+            raise CodexError("在监控时限内未能核对回合结果。请先查看原对话。")
+    except Exception as exc:
+        next_state = {"preparing": "failed", "queued": "queue_pending"}.get(state, "unknown")
+        detail = error_text(exc)
+        if state == "queued":
+            detail = "消息已入队，后续结果需在原对话核对。" + detail
+        store.transition(job_id, state, next_state, detail)
+        return 2
+
+
 def send_job(store, job):
     job_id, thread_id = job["id"], job["thread_id"]
-    connection = Connection(job["codex_home"], job["codex_path"])
+    connection = Connection(job["codex_home"], job["codex_path"], bool(job["shared"]))
+    if job["uses_queue"]:
+        return send_queued_job(store, job, connection)
+    new_chat = bool(job["new_chat"])
     refused = []
     state = "preparing"
 
@@ -376,49 +504,54 @@ def send_job(store, job):
         store.log(job_id, f"后台任务未提供交互批准或输入（{method}）。")
 
     try:
-        thread = read_local_target(connection, thread_id)
-        with AppServer(connection, cwd=thread["cwd"], on_interaction=log_interaction) as server:
+        cwd = job["cwd"] if new_chat else read_local_target(connection, thread_id)["cwd"]
+        if not Path(cwd).is_dir():
+            raise CodexError("目标工作目录不可用。")
+        with AppServer(connection, cwd=cwd, on_interaction=log_interaction) as server:
             server.check_account()
-            server.ensure_idle(thread_id)
-            result = server.request("thread/resume", {"threadId": thread_id, "excludeTurns": True}, timeout=60)
-            resumed = result["thread"]
-            if resumed.get("id") != thread_id or resumed.get("status", {}).get("type") == "active":
-                raise CodexError("原会话未成功恢复，或当前有回合正在运行。")
+            if new_chat:
+                params = {"cwd": cwd, "ephemeral": False}
+                if job["model"]:
+                    params["model"] = job["model"]
+                try:
+                    created = server.request("thread/start", params, timeout=60)["thread"]
+                except RequestError as exc:
+                    if job["continuous"] and not refused and is_usage_limit_error(exc.data):
+                        return reschedule_after_quota(store, job, server, state, None, recreate=True)
+                    raise
+                thread_id = validate_thread_id(created["id"])
+                if created.get("ephemeral") or thread_id in (job["scope_thread_id"], job_id):
+                    raise CodexError("Codex 未返回独立的已保存会话。")
+                store.assign_new_chat(job_id, thread_id)
+                job = store.get(job_id)
+            else:
+                server.ensure_idle(thread_id)
+                result = server.request("thread/resume", {"threadId": thread_id, "excludeTurns": True}, timeout=60)
+                resumed = result["thread"]
+                if resumed.get("id") != thread_id or resumed.get("status", {}).get("type") == "active":
+                    raise CodexError("原会话未成功恢复，或当前有回合正在运行。")
             key = None
-            if job["continuous"]:
+            if job["continuous"] and not new_chat:
                 goal = server.read_goal(thread_id)
                 stopped = goal_stop(goal, job["goal_key"])
                 if stopped:
                     store.transition(job_id, state, *stopped)
                     return 0
                 key = goal_key(goal)
-            store.transition(job_id, state, "submitting", "已恢复原会话，正在提交一次消息。")
+            store.transition(job_id, state, "submitting", "目标会话已就绪，正在提交一次消息。")
             state = "submitting"
             try:
-                turn_id = server.start_turn(thread_id, job["message"])["id"]
+                overrides = {name: job[name] for name in ("model", "effort") if job[name]}
+                turn_id = server.start_turn(thread_id, job["message"], **overrides)["id"]
             except RequestError as exc:
                 if job["continuous"] and not refused and is_usage_limit_error(exc.data):
-                    return reschedule_after_quota(store, job, server, state, key)
+                    return reschedule_after_quota(store, job, server, state, key, recreate=new_chat)
                 store.transition(job_id, state, "failed", error_text(exc))
                 return 2
             store.transition(job_id, state, "accepted", f"Codex 已接收消息。Turn ID {turn_id}", turn_id=turn_id)
             state = "accepted"
             turn = server.wait_turn(thread_id, turn_id, timeout=RUN_LIMIT_SECONDS)
-            reason = turn.get("error") or {}
-            quota_hit = is_usage_limit_error(reason)
-            if job["continuous"] and not refused and quota_hit:
-                return reschedule_after_quota(store, job, server, state, key)
-            if turn.get("status") == "completed" and not quota_hit:
-                detail = "Codex 回合已完成。"
-                if refused:
-                    detail += " 本次执行有交互请求被拒绝，请看上方记录。"
-                elif job["continuous"]:
-                    detail += " 持续续跑结束。"
-                store.transition(job_id, state, "review" if refused else "completed", detail)
-                return 0
-            detail = reason.get("message") or turn.get("status") or "未知状态"
-            store.transition(job_id, state, "failed", "Codex 回合未完成。" + error_text(detail))
-            return 2
+            return finish_turn(store, job, server, state, key, turn, bool(refused))
     except Exception as exc:
         next_state = "failed" if state == "preparing" else "unknown"
         store.transition(job_id, state, next_state, error_text(exc))

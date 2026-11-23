@@ -1,0 +1,9 @@
+{
+  "name": "codex-auto-resume",
+  "mcpServers": {
+    "autoresume-panel": {
+      "command": "py",
+      "env_vars": ["CODEX_HOME", "CODEX_AUTO_RESUME_SHARED", "LOCALAPPDATA"]
+    }
+  }
+}

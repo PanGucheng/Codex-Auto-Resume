@@ -10,8 +10,8 @@ from threading import RLock
 import time
 import uuid
 
-from codex_client import AppServer, CodexError, Connection, check_target, error_text
-from jobs import DEFAULT_MESSAGE, RUNNING_STATES, JobStore, thread_title, validate_thread_id
+from codex_client import AppServer, CodexError, Connection, check_target, error_text, read_local_target
+from jobs import DEFAULT_MESSAGE, RUNNING_STATES, JobOptions, JobStore, thread_title, validate_thread_id
 from local_datetime import parse_local_time
 
 
@@ -69,14 +69,15 @@ class PanelService:
             if target is None:
                 return {"state": "unbound", "reason": "Codex 未提供可验证的当前会话，请粘贴本机会话链接。"}
             try:
-                thread = check_target(self.connection, target)
+                thread = read_local_target(self.connection, target)
             except (CodexError, OSError) as exc:
                 return {"state": "unbound", "reason": error_text(exc)}
             with self.bindings_lock:
                 if binding.thread and binding.thread["id"] != thread["id"]:
                     raise ValueError("面板已经绑定会话。请在目标对话里打开面板。")
                 binding.thread = thread
-        return {"state": "bound", "title": thread_title(thread), "id": thread["id"]}
+        return {"state": "bound", "title": thread_title(thread), "id": thread["id"], "cwd": thread["cwd"],
+                "shared": self.connection.shared}
 
     def target(self, key):
         thread = self.binding(key).thread
@@ -101,6 +102,15 @@ class PanelService:
             windows[name] = {**asdict(window), "resetLocal": display_time(window.resets_at)} if window else None
         return {**windows, "suggestion": suggestion, "reason": reason}
 
+    def models(self, key):
+        thread = self.target(key)
+        with AppServer(self.connection, cwd=thread["cwd"]) as server:
+            models = server.models()
+        return {"models": [{"id": row["model"], "label": row["displayName"],
+                            "defaultEffort": row.get("defaultReasoningEffort"),
+                            "efforts": [option["reasoningEffort"] for option in row.get("supportedReasoningEfforts", [])]}
+                           for row in models if "text" in row.get("inputModalities", ["text"])]}
+
     @staticmethod
     def job_summary(row):
         state = row["state"]
@@ -110,7 +120,10 @@ class PanelService:
         elif state in RUNNING_STATES and row["continue_enabled"]:
             action = "stop"
         return {"id": row["id"], "state": state, "scheduledLocal": display_time(row["scheduled_at"]),
-                "continuous": bool(row["continuous"]), "action": action}
+                "continuous": bool(row["continuous"]), "action": action,
+                "delivery": "queue" if row["uses_queue"] else "app_server",
+                "newChat": row["scope_thread_id"] is not None,
+                "model": row["model"], "effort": row["effort"]}
 
     def jobs(self, key):
         thread = self.target(key)
@@ -120,7 +133,7 @@ class PanelService:
     def owned_job(self, key, job_id):
         thread = self.target(key)
         row = self.store.get(job_id)
-        if (not row or row["thread_id"] != thread["id"]
+        if (not row or thread["id"] not in (row["thread_id"], row["scope_thread_id"])
                 or os.path.normcase(row["codex_home"]) != os.path.normcase(self.connection.home)):
             raise ValueError("当前会话没有这个计划。")
         return row
@@ -132,10 +145,12 @@ class PanelService:
             for event in self.store.events(job_id)
         ]}
 
-    def create(self, key, request_id, mode, when, message, wake, continuous):
+    def create(self, key, request_id, mode, when, message, wake, continuous, new_chat=False, model="", effort=""):
         thread = self.target(key)
         request_id = uuid.UUID(request_id).hex
         identity = [os.path.normcase(self.connection.home), thread["id"], mode, when, message, wake, continuous]
+        if new_chat or model or effort:
+            identity.extend((new_chat, model, effort))
         request = (request_id, sha256(json.dumps(identity).encode()).hexdigest())
         if existing := self.store.submitted_job(request):
             return {"state": "created", "job": self.job_summary(self.owned_job(key, existing))}
@@ -149,8 +164,13 @@ class PanelService:
             scheduled_at = parse_local_time(when.replace("T", " "))
         else:
             raise ValueError("请选择发送时间。")
+        if model or effort:
+            selected = next((row for row in self.models(key)["models"] if row["id"] == model), None)
+            if not selected or (effort and effort not in selected["efforts"]):
+                raise ValueError("选定的模型或思考强度当前不可用。")
         validated = check_target(self.connection, thread["id"])
-        job = self.store.schedule(self.connection, validated, message, scheduled_at, wake, continuous, request)
+        job = self.store.schedule(self.connection, validated, message, scheduled_at, wake, continuous, request,
+                                  options=JobOptions(new_chat, model or None, effort or None))
         return {"state": "created", "job": self.job_summary(self.owned_job(key, job))}
 
     def stop(self, key, job_id, action):

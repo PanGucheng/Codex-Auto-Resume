@@ -20,8 +20,11 @@ class PanelTests(unittest.TestCase):
         target = patch("panel.panel_service.check_target")
         self.scheduler = scheduler.start()
         self.target = target.start()
+        reader = patch("panel.panel_service.read_local_target", self.target)
+        reader.start()
         self.addCleanup(scheduler.stop)
         self.addCleanup(target.stop)
+        self.addCleanup(reader.stop)
         self.target.side_effect = lambda connection, thread: {"id": thread, "cwd": temp.name, "name": "对话 " + thread}
         self.when = (datetime.now() + timedelta(hours=1)).strftime("%Y-%m-%dT%H:%M:%S")
 
@@ -72,6 +75,19 @@ class PanelTests(unittest.TestCase):
         with self.assertRaises(ValueError):
             self.panel.create(key, request, "manual", self.when, "other", False, True)
 
+    def test_new_chat_and_model_choices_are_saved_on_the_confirming_panel(self):
+        a, b = self.bind("a"), self.bind("b")
+        with patch.object(self.panel, "models", return_value={"models": [{"id": "test-model", "efforts": ["high"]}]}):
+            with self.assertRaisesRegex(ValueError, "当前不可用"):
+                self.panel.create(a, uuid4().hex, "manual", self.when, "new", False, True, True, "test-model", "low")
+            self.scheduler.assert_not_called()
+            job = self.panel.create(a, uuid4().hex, "manual", self.when, "new", False, True, True, "test-model", "high")["job"]
+        self.assertTrue(job["newChat"])
+        self.assertEqual(job["delivery"], "app_server")
+        self.assertEqual((job["model"], job["effort"]), ("test-model", "high"))
+        self.assertEqual(self.panel.jobs(a)["jobs"], [job])
+        self.assertEqual(self.panel.jobs(b)["jobs"], [])
+
     def test_quota_change_requires_confirmation_and_retry_after_commit_uses_original_result(self):
         key = self.bind("a")
         timestamp = int(datetime.fromisoformat(self.when).timestamp())
@@ -83,6 +99,7 @@ class PanelTests(unittest.TestCase):
             self.scheduler.assert_not_called()
             args = (key, request, "quota", timestamp, "go", False, False)
             first = self.panel.create(*args)
+            self.assertEqual(first["job"]["delivery"], "queue")
             read.return_value = {"suggestion": None}
             self.assertEqual(first, self.panel.create(*args))
             self.scheduler.assert_called_once()

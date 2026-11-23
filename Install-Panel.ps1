@@ -3,7 +3,7 @@ param([switch]$RuntimeOnly)
 $ErrorActionPreference = 'Stop'
 $root = Join-Path $env:LOCALAPPDATA 'CodexAutoResumeGUI\panel-runtime'
 $files = @('panel/pyproject.toml', 'panel/uv.lock', 'panel/panel_server.py', 'panel/panel_service.py',
-           'main.pyw', 'jobs.py', 'codex_client.py', 'local_datetime.py', 'task-scheduler.ps1')
+           'main.pyw', 'jobs.py', 'codex_client.py', 'local_datetime.py', 'task-scheduler.ps1', 'shared_host.py')
 $bundle = Join-Path $PSScriptRoot 'plugins/codex-auto-resume/panel.html'
 if (-not (Test-Path -LiteralPath $bundle -PathType Leaf)) { throw 'Build panel.html before installing.' }
 $basePython = & py -3 -c 'import sys; assert sys.version_info >= (3, 10); print(sys.executable)'
@@ -35,9 +35,14 @@ $temp = Join-Path $root ([guid]::NewGuid().ToString('N') + '.json')
 if ($LASTEXITCODE -ne 0) { throw 'Could not activate the installed panel runtime.' }
 
 if (-not $RuntimeOnly) {
-    & codex plugin marketplace add $PSScriptRoot
+    $package = Get-AppxPackage OpenAI.Codex | Select-Object -First 1
+    $codex = if ($package) { Join-Path $package.InstallLocation 'app/resources/codex.exe' }
+    if (-not $codex -or -not (Test-Path -LiteralPath $codex -PathType Leaf)) {
+        $codex = (Get-Command codex -ErrorAction Stop).Source
+    }
+    & $codex plugin marketplace add $PSScriptRoot
     if ($LASTEXITCODE -ne 0) { throw 'Could not register the local plugin marketplace.' }
-    & codex plugin add 'codex-auto-resume@codex-autoresume-local'
+    & $codex plugin add 'codex-auto-resume@codex-autoresume-local'
     if ($LASTEXITCODE -ne 0) { throw 'Could not install the plugin. Check the local marketplace in Codex Desktop.' }
 }
 Write-Output "Codex Auto Resume runtime ready ($version)."
