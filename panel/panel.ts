@@ -19,7 +19,7 @@ const el = <T extends HTMLElement = HTMLElement>(id: string) => document.getElem
 const input = (id: string) => el<HTMLInputElement>(id);
 const button = (id: string) => el<HTMLButtonElement>(id);
 const dialog = el<HTMLDialogElement>("confirmation");
-const app = new App({ name: "Codex Auto Resume", version: "1.2.1" });
+const app = new App({ name: "Codex Auto Resume", version: "1.2.2" });
 let key = "";
 let bindingRevision = 0;
 let jobsRevision = 0;

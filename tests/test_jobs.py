@@ -3,7 +3,7 @@ from pathlib import Path
 import tempfile
 import time
 import unittest
-from unittest.mock import ANY, patch
+from unittest.mock import ANY, call, patch
 
 from codex_client import CodexError, CodexQuota, Connection, QuotaWindow, RequestError
 from jobs import JobStore, run_job, task_name
@@ -96,7 +96,7 @@ class JobTests(unittest.TestCase):
         self.store.reconcile_workers()
         self.assertEqual(self.store.get(first)["state"], "unknown")
 
-    def test_continuation_uses_later_exhausted_window_and_next_round_stops_on_done(self):
+    def test_continuation_uses_later_exhausted_window_and_stops_after_a_successful_round(self):
         job = self.schedule(continuous=True)
         _, server = self.fake_server()
         short_reset, week_reset = int(time.time()) + 600, int(time.time()) + 7200
@@ -116,19 +116,33 @@ class JobTests(unittest.TestCase):
         with self.store.db() as db:
             db.execute("UPDATE jobs SET scheduled_at = ? WHERE id = ?", (time.time() - 1, child_id))
         server.wait_turn.return_value = {"status": "completed"}
-        server.last_agent_message = f"任务已完成。\nAUTO_RESUME_{child_id}: DONE\n"
         self.assertEqual(run_job(self.store, child_id), 0)
         self.assertEqual(self.store.get(child_id)["state"], "completed")
         self.assertEqual(len(self.store.all()), 2)
+        self.assertEqual(server.start_turn.call_args_list, [call(self.thread["id"], "继续任务\n保留换行")] * 2)
+        server.read_quota.assert_called_once_with()
 
-    def test_unmarked_success_does_not_schedule_again(self):
+    def test_normal_completion_stops_even_with_an_active_goal(self):
         job = self.schedule(continuous=True)
         _, server = self.fake_server()
-        server.last_agent_message = "还有任务，但缺少明确状态行。"
-        self.assertEqual(run_job(self.store, job), 2)
-        self.assertEqual(self.store.get(job)["state"], "review")
+        server.read_goal.return_value = {"objective": "Finish the test", "createdAt": 123, "status": "active"}
+        self.assertEqual(run_job(self.store, job), 0)
+        self.assertEqual(self.store.get(job)["state"], "completed")
         server.read_quota.assert_not_called()
         self.assertEqual(len(self.store.all()), 1)
+
+    def test_quota_interruption_with_completed_status_schedules_again(self):
+        job = self.schedule(continuous=True)
+        _, server = self.fake_server()
+        reset = int(time.time()) + 600
+        server.read_quota.return_value = CodexQuota(QuotaWindow(100, reset), None)
+        server.wait_turn.return_value = {"status": "completed", "error": {"codexErrorInfo": "usageLimitExceeded"}}
+
+        self.assertEqual(run_job(self.store, job), 0)
+        next_job, previous = self.store.all()
+        self.assertEqual(previous["state"], "rescheduled")
+        self.assertEqual(next_job["parent_id"], job)
+        self.assertEqual(next_job["scheduled_at"], reset + 60)
 
     def test_native_goal_completion_overrides_quota_failure(self):
         job = self.schedule(continuous=True)
@@ -147,8 +161,7 @@ class JobTests(unittest.TestCase):
 
         def wait(*args, **kwargs):
             self.store.stop_followups(job)
-            server.last_agent_message = f"AUTO_RESUME_{job}: CONTINUE"
-            return {"status": "completed"}
+            return {"status": "failed", "error": {"codexErrorInfo": "usageLimitExceeded"}}
 
         server.wait_turn.side_effect = wait
         self.assertEqual(run_job(self.store, job), 0)
@@ -159,8 +172,8 @@ class JobTests(unittest.TestCase):
     def test_failed_followup_registration_does_not_leave_partial_chain(self):
         job = self.schedule(continuous=True)
         _, server = self.fake_server()
-        server.last_agent_message = f"AUTO_RESUME_{job}: CONTINUE"
-        server.read_quota.return_value = CodexQuota(QuotaWindow(50, int(time.time()) + 600), None)
+        server.wait_turn.return_value = {"status": "failed", "error": {"codexErrorInfo": "usageLimitExceeded"}}
+        server.read_quota.return_value = CodexQuota(QuotaWindow(100, int(time.time()) + 600), None)
         self.scheduler.side_effect = RuntimeError("scheduler failure")
         self.assertEqual(run_job(self.store, job), 2)
         self.assertEqual(self.store.get(job)["state"], "review")

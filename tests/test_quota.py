@@ -38,16 +38,25 @@ class QuotaTests(unittest.TestCase):
         with self.assertRaises(CodexError):
             CodexQuota(QuotaWindow(10, 300), None, ordinary_usage_allowed=False).resume_time(100)
 
-    def test_notifications_preserve_terminal_assistant_message_and_usage_error(self):
+    def test_usage_error_notification_is_preserved_when_the_turn_has_no_error(self):
         server = AppServer(Connection("unused"))
         packets = [
-            ("item/completed", {"item": {"type": "agentMessage", "phase": "final_answer", "text": "Final marker"}}),
-            ("item/completed", {"item": {"type": "agentMessage", "phase": "commentary", "text": "Ignore"}}),
             ("error", {"error": {"codexErrorInfo": "usageLimitExceeded"}, "willRetry": False}),
             ("turn/completed", {"turn": {"id": "turn-1", "status": "failed"}}),
         ]
         for method, params in packets:
             server.messages.put({"method": method, "params": {"threadId": "thread-1", "turnId": "turn-1", **params}})
         turn = server.wait_turn("thread-1", "turn-1", timeout=1)
-        self.assertEqual(server.last_agent_message, "Final marker")
+        self.assertEqual(turn["error"]["codexErrorInfo"], "usageLimitExceeded")
+
+    def test_terminal_usage_error_survives_a_generic_turn_error(self):
+        server = AppServer(Connection("unused"))
+        packets = [
+            ("error", {"error": {"codexErrorInfo": "usageLimitExceeded"}, "willRetry": False}),
+            ("error", {"error": {"codexErrorInfo": "other"}, "willRetry": False}),
+            ("turn/completed", {"turn": {"id": "turn-1", "status": "completed", "error": {"codexErrorInfo": "other"}}}),
+        ]
+        for method, params in packets:
+            server.messages.put({"method": method, "params": {"threadId": "thread-1", "turnId": "turn-1", **params}})
+        turn = server.wait_turn("thread-1", "turn-1", timeout=1)
         self.assertEqual(turn["error"]["codexErrorInfo"], "usageLimitExceeded")

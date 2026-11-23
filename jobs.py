@@ -13,7 +13,7 @@ import time
 import uuid
 
 from codex_client import (AppServer, CodexError, Connection, MIN_SCHEDULE_LEAD_SECONDS, NO_WINDOW,
-                          RequestError, error_text, read_local_target)
+                          RequestError, error_text, is_usage_limit_error, read_local_target)
 
 
 APP_DIR = Path(__file__).resolve().parent
@@ -346,14 +346,7 @@ def goal_stop(goal, expected_key):
     return None
 
 
-def continuation_message(message, marker):
-    return (f"{message}\n\n"
-            "这是一轮自动续跑。先核对原任务的已完成项、待办和阻塞，再推进原任务范围。"
-            f"先简述进度，最终回复的末行只写 `{marker} 状态码`，省略反引号。"
-            "原任务已完成用 DONE，还有可自主完成的工作用 CONTINUE，需要人工决定、批准或处理阻塞用 BLOCKED。")
-
-
-def finish_continuation(store, job, server, previous, key, marker, quota_hit):
+def reschedule_after_quota(store, job, server, previous, key):
     job_id = job["id"]
     try:
         if not store.get(job_id)["continue_enabled"]:
@@ -364,19 +357,8 @@ def finish_continuation(store, job, server, previous, key, marker, quota_hit):
         if stopped:
             store.transition(job_id, previous, *stopped)
             return 0
-        if not quota_hit and not goal:
-            lines = server.last_agent_message.rstrip().splitlines()
-            report = lines[-1].strip() if lines else ""
-            if report == f"{marker} DONE":
-                store.transition(job_id, previous, "completed", "Codex 报告原任务已完成，持续续跑结束。")
-                return 0
-            if report != f"{marker} CONTINUE":
-                detail = "Codex 报告需要人工处理。" if report == f"{marker} BLOCKED" else "Codex 未明确报告任务是否仍需续跑。"
-                store.transition(job_id, previous, "review", detail + "请查看原会话。")
-                return 2
-        detail = "本轮遇到 Codex 额度限制。" if quota_hit else "原任务仍有可继续的工作。"
         next_run = server.read_quota().resume_time(time.time())
-        store.schedule_followup(job, previous, next_run, key, detail)
+        store.schedule_followup(job, previous, next_run, key, "本轮遇到 Codex 额度限制。")
         return 0
     except Exception as exc:
         store.transition(job_id, previous, "review", f"后续轮次未能安排。{error_text(exc)}")
@@ -402,8 +384,7 @@ def send_job(store, job):
             resumed = result["thread"]
             if resumed.get("id") != thread_id or resumed.get("status", {}).get("type") == "active":
                 raise CodexError("原会话未成功恢复，或当前有回合正在运行。")
-            message = job["message"]
-            key, marker = None, f"AUTO_RESUME_{job_id}:"
+            key = None
             if job["continuous"]:
                 goal = server.read_goal(thread_id)
                 stopped = goal_stop(goal, job["goal_key"])
@@ -411,29 +392,28 @@ def send_job(store, job):
                     store.transition(job_id, state, *stopped)
                     return 0
                 key = goal_key(goal)
-                if not goal:
-                    message = continuation_message(message, marker)
             store.transition(job_id, state, "submitting", "已恢复原会话，正在提交一次消息。")
             state = "submitting"
             try:
-                turn_id = server.start_turn(thread_id, message)["id"]
+                turn_id = server.start_turn(thread_id, job["message"])["id"]
             except RequestError as exc:
-                if (job["continuous"] and not refused and isinstance(exc.data, dict)
-                        and exc.data.get("codexErrorInfo") == "usageLimitExceeded"):
-                    return finish_continuation(store, job, server, state, key, marker, quota_hit=True)
+                if job["continuous"] and not refused and is_usage_limit_error(exc.data):
+                    return reschedule_after_quota(store, job, server, state, key)
                 store.transition(job_id, state, "failed", error_text(exc))
                 return 2
             store.transition(job_id, state, "accepted", f"Codex 已接收消息。Turn ID {turn_id}", turn_id=turn_id)
             state = "accepted"
             turn = server.wait_turn(thread_id, turn_id, timeout=RUN_LIMIT_SECONDS)
             reason = turn.get("error") or {}
-            quota_hit = turn.get("status") == "failed" and reason.get("codexErrorInfo") == "usageLimitExceeded"
-            if job["continuous"] and not refused and (turn.get("status") == "completed" or quota_hit):
-                return finish_continuation(store, job, server, state, key, marker, quota_hit)
-            if turn.get("status") == "completed":
+            quota_hit = is_usage_limit_error(reason)
+            if job["continuous"] and not refused and quota_hit:
+                return reschedule_after_quota(store, job, server, state, key)
+            if turn.get("status") == "completed" and not quota_hit:
                 detail = "Codex 回合已完成。"
                 if refused:
                     detail += " 本次执行有交互请求被拒绝，请看上方记录。"
+                elif job["continuous"]:
+                    detail += " 持续续跑结束。"
                 store.transition(job_id, state, "review" if refused else "completed", detail)
                 return 0
             detail = reason.get("message") or turn.get("status") or "未知状态"

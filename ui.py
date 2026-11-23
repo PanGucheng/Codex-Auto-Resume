@@ -210,7 +210,7 @@ class Window:
         self.prompt.pack(fill="both", expand=True, pady=(5, 9))
         self.set_default_prompt()
         self.continuous = tk.BooleanVar(value=False)
-        ttk.Checkbutton(actions, text="持续续跑：任务未完成时，按下次额度恢复时间继续",
+        ttk.Checkbutton(actions, text="持续续跑：因额度用尽中断时，等额度恢复后继续",
                         variable=self.continuous, command=self._set_plan_label).pack(anchor="w")
         self.wake = tk.BooleanVar(value=False)
         ttk.Checkbutton(actions, text="允许 Windows 尝试从睡眠唤醒", variable=self.wake).pack(anchor="w")
@@ -477,7 +477,7 @@ class Window:
 
         def verified(thread):
             excerpt = message if len(message) <= 350 else message[:350] + "…"
-            run_mode = "持续续跑 · 按额度恢复时间安排后续轮次" if continuous else "一次性发送"
+            run_mode = "持续续跑 · 仅在额度用尽后安排下一轮" if continuous else "一次性发送"
             confirmed = messagebox.askokcancel(
                 "确认计划", f"{thread_title(thread)[:140]}\n{target}\n{thread['cwd']}\n\n"
                 f"首次发送：{local_time(scheduled_at)}（本地时间）\n{run_mode}\n\n{excerpt}", parent=self.root,

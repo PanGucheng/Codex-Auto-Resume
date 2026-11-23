@@ -72,6 +72,10 @@ def error_text(error):
     return " ".join(str(error).split())[:1500] or type(error).__name__
 
 
+def is_usage_limit_error(error):
+    return isinstance(error, dict) and error.get("codexErrorInfo") == "usageLimitExceeded"
+
+
 @dataclass(frozen=True)
 class QuotaWindow:
     used_percent: int
@@ -131,7 +135,6 @@ class AppServer:
         self.messages = queue.Queue()
         self.pending = []
         self.request_id = 0
-        self.last_agent_message = ""
 
     def __enter__(self):
         if not Path(self.connection.home).is_dir():
@@ -235,7 +238,7 @@ class AppServer:
                 if not isinstance(packet.get("result"), dict):
                     raise CodexError(f"{method}: Codex 返回了无法识别的响应。")
                 return packet["result"]
-            if watch_turn and packet.get("method") in ("turn/completed", "error", "item/completed"):
+            if watch_turn and packet.get("method") in ("turn/completed", "error"):
                 self.pending.append(packet)
 
     def list_threads(self, cursor=None, search=""):
@@ -286,7 +289,6 @@ class AppServer:
 
     def wait_turn(self, thread_id, turn_id, timeout):
         deadline = time.monotonic() + timeout
-        self.last_agent_message = ""
         turn_error = None
         while True:
             packet = self.pending.pop(0) if self.pending else self._receive(deadline)
@@ -295,16 +297,13 @@ class AppServer:
                 continue
             if method == "turn/completed" and params["turn"].get("id") == turn_id:
                 turn = params["turn"]
-                if turn_error and not (turn.get("error") or {}).get("codexErrorInfo"):
+                if turn_error and (is_usage_limit_error(turn_error)
+                                   or not (turn.get("error") or {}).get("codexErrorInfo")):
                     turn = {**turn, "error": turn_error}
                 return turn
             if params.get("turnId") != turn_id:
                 continue
-            if method == "item/completed":
-                item = params.get("item") or {}
-                if item.get("type") == "agentMessage" and item.get("phase") in (None, "final_answer"):
-                    self.last_agent_message = item.get("text") or ""
-            elif method == "error" and not params.get("willRetry"):
+            if method == "error" and not params.get("willRetry") and not is_usage_limit_error(turn_error):
                 turn_error = params.get("error")
 
 
